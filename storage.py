@@ -1,15 +1,20 @@
 """SQLite locally or PostgreSQL on a server. Never fall back after database failure."""
-import os,re,sqlite3
+import os,re,sqlite3,threading
+READY=set()
+LOCK=threading.Lock()
 SCHEMA='signaldesk'
 class Postgres:
     def __init__(self,url):
         import psycopg
-        self.c=psycopg.connect(url,connect_timeout=10,sslmode='verify-full',sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
-        self.c.execute('CREATE SCHEMA IF NOT EXISTS signaldesk')
-        self.c.execute('SET search_path TO signaldesk')
-        for table,cols in [('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL'),('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL')]:
-            self.c.execute('CREATE TABLE IF NOT EXISTS '+table+' (rowid BIGSERIAL UNIQUE,'+cols+')')
-        self.c.commit()
+        self.c=psycopg.connect(url,connect_timeout=10,options='-c statement_timeout=15000 -c lock_timeout=5000',sslmode='verify-full',sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
+        self.c.execute("SET search_path TO signaldesk")
+        with LOCK:
+            if url not in READY:
+                self.c.execute('CREATE SCHEMA IF NOT EXISTS signaldesk')
+                for table,cols in [('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL'),('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL')]:
+                    self.c.execute('CREATE TABLE IF NOT EXISTS '+table+' (rowid BIGSERIAL UNIQUE,'+cols+')')
+                self.c.commit();READY.add(url)
+            else:self.c.commit()
     def execute(self,sql,args=()):
         if sql=='BEGIN IMMEDIATE':sql='BEGIN'
         if 'INSERT' in sql and ' VALUES' in sql:
