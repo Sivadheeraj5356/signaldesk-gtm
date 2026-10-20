@@ -29,7 +29,7 @@ def domain(v):
     v=text(v,300).lower(); p=urlparse(v if '://' in v else 'https://'+v)
     if p.scheme not in ['http','https'] or p.username or p.password or p.port not in [None,80,443]:raise ValueError('Company domain must not contain credentials or a nonstandard port')
     h=p.hostname or ''
-    if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}',h) or '..' in h: raise ValueError('Enter a valid company domain, for example company.example')
+    if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}',h) or '..' in h or any(not label or len(label)>63 or label.startswith('-') or label.endswith('-') for label in h.split('.')): raise ValueError('Enter a valid company domain, for example company.example')
     return h.removeprefix('www.')
 def clean(d):
     if not text(d.get('company')): raise ValueError('Company is required')
