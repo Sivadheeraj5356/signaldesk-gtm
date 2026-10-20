@@ -7,3 +7,5 @@ node_modules/
 .env.*
 exports/
 *.csv
+*.gguf
+models/
