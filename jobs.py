@@ -52,6 +52,8 @@ def process(s,j):
                         except Exception as e:
                             # No silent use of stale research after a requested refresh failed.
                             item.update(status='error');item['steps'].append('Research failed; account left unchanged: '+str(e)[:300])
+                    if item['status']!='error' and CANCEL.is_set():
+                        item.update(status='cancelled');item['steps'].append('Cancelled before scoring/draft; any completed research is preserved')
                     if item['status']!='error' and not CANCEL.is_set():
                         a=s.prepare(a,j['config']);s.save(a);item['score']=a['score'];item['engine']=a['engine'];item['steps'].append('Scored using job config snapshot')
                         item['steps'].append('Draft prepared for human review' if a['draft'] else 'No draft: below threshold or generation error')
