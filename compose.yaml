@@ -1,0 +1,15 @@
+services:
+  signaldesk:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      SIGNALDESK_MODE: server
+      SIGNALDESK_ORIGIN: ${SIGNALDESK_ORIGIN:?Set your HTTPS origin}
+      SIGNALDESK_PASSWORD: ${SIGNALDESK_PASSWORD:?Set a strong owner password}
+      SIGNALDESK_PERSISTENT_DISK: "1"
+    volumes:
+      - signaldesk-data:/data
+volumes:
+  signaldesk-data:
