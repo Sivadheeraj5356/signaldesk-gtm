@@ -4,7 +4,7 @@
 
 A local-first GTM preparation product for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
 
-## Run in one minute
+## Run locally
 
 Python 3.10 or newer. No Python packages, API keys, credit card or cloud service required for the default template mode.
 
@@ -32,7 +32,7 @@ Open **http://127.0.0.1:8787**. Click **Try sample data**, then **Run workflow**
 | Email, LinkedIn and partnership templates, editing, suppression and review gate | Implemented and tested |
 | Distribution experiment board, manual funnel metrics and learning log | Implemented and tested, no automatic publishing/tracking |
 | Durable asynchronous batch research -> scoring -> drafts, cancellation and restart recovery | Implemented and tested |
-| SQLite persistence, workspace JSON backup, run snapshots and CSV export | Implemented and tested |
+| SQLite persistence, workspace JSON backup/validated atomic restore, run snapshots and CSV export | Implemented and tested |
 | Local GGUF AI value question | Actual Qwen 2.5 1.5B Q4 inference tested; optional install, human review required |
 | Local Ollama generation | Optional adapter implemented; Ollama-specific path not live-tested |
 | Email discovery/verification, enrichment waterfall, CRM sync, schedules, campaign delivery, automated analytics | Not implemented |
@@ -62,7 +62,7 @@ Alternative, unvalidated Ollama path: start an already-installed model, then `SI
 
 Open an account, then **Research public homepage**. This replaces evidence with a text excerpt, title, timestamp, URL and SHA-256 content hash; it clears the draft, score and review. It does not independently verify the page's claims.
 
-Research is a single explicit action, not a crawler or scheduler. Only the company's HTTPS homepage is requested, after robots.txt checks. Private/reserved IPs, mixed DNS answers, credentials in URLs, non-443 ports, cross-host redirects and oversized pages are rejected. Connections are pinned to the validated IP with TLS hostname verification. No cookies, JavaScript execution, login, API keys or contact discovery. Email addresses and phone-like strings are removed from the visible excerpt. Limits: 500 KB/page, 8-second socket connection/read timeout (DNS and slow trickles can take longer; not a hard total deadline), two same-host redirects, one research request/domain/minute. Sites requesting crawl delay, failing robots policy checks or needing browser rendering should use manual evidence instead. A failure preserves previous evidence.
+Research is a single explicit action, not a crawler or scheduler. Only the company's HTTPS homepage is requested, after robots.txt checks. Private/reserved IPs, mixed DNS answers, credentials in URLs, non-443 ports, cross-host redirects and oversized pages are rejected. Connections are pinned to the validated IP with TLS hostname verification. No cookies, JavaScript execution, login, API keys or contact discovery. Email addresses and phone-like strings are removed from the visible excerpt. Limits: 500 KB/page, 8-second socket connection/read timeout inside a separate worker process killed at a 25-second total deadline, covering DNS and slow response bodies, two same-host redirects, one research request/domain/minute. Sites requesting crawl delay, failing robots policy checks or needing browser rendering should use manual evidence instead. A failure preserves previous evidence.
 
 ## CSV format
 
@@ -75,7 +75,7 @@ company,domain,industry,region,size,contact,evidence,source,suppressed
 Northstar Demo,northstar.example,SaaS,India,48,,Fictional signal: growing sales team,https://northstar.example/news,false
 ```
 
-Maximum 500 records per import, 2 MB request limit. `size` is a nonnegative integer or blank. `source` must be an HTTP(S) URL. `suppressed` accepts true/1/yes. Missing fields earn no matching points. Source presence is not verification or confidence. No emails are guessed or validated.
+Maximum 500 records per import, 2 MB CSV client limit, 10 MB HTTP JSON request limit. `size` is a nonnegative integer or blank. `source` must be an HTTP(S) URL. `suppressed` accepts true/1/yes. Missing fields earn no matching points. Source presence is not verification or confidence. No emails are guessed or validated.
 
 ## Safety and data
 
@@ -100,7 +100,9 @@ npm run test:e2e
 SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 ```
 
-36 Python unit/API/job tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+45 Python unit/API/job/restore tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+
+The 0.3 UI uses original deep-navy navigation, a compact operational layout, clearer pipeline hierarchy, review states and responsive account cards. No external fonts/assets or analytics are loaded.
 
 ## Architecture
 
@@ -108,13 +110,13 @@ SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 
 `index.html`: dependency-free responsive application UI.
 
-`jobs.py`: durable batch worker. `research.py`: bounded public homepage research. `test_server.py`: standard-library tests. `test_ai.py`: opt-in real GGUF inference test. `e2e.cjs`: optional Playwright browser test.
+`backup.py`: strict validation and atomic restore. `jobs.py`: durable batch worker. `research.py`: bounded public homepage research. `test_server.py`: standard-library tests. `test_ai.py`: opt-in real GGUF inference test. `e2e.cjs`: optional Playwright browser test.
 
 ## Automated account preparation
 
 In Automation, select 1-25 accounts, optionally refresh their public homepage evidence, then start a batch. The durable job snapshots the playbook, runs research -> scoring -> draft preparation sequentially, skips suppressed accounts, and records per-account results. Research failure preserves that account and skips draft regeneration instead of silently using stale evidence. Jobs continue while the local server runs, even with the browser closed. The UI refreshes active job status every three seconds; that local refresh does not re-fetch external websites. Server restart marks unfinished jobs interrupted, with no automatic retry. Cancel stops between steps; an in-flight request or local inference can finish first. Workspace writes are rejected while a batch is active to avoid racing edits against generated drafts.
 
-Workspace backup downloads local account data, playbook, experiments, recent run traces and recent job history as JSON. Treat it as private prospect data; do not upload it to GitHub. This version exports backups but does not yet import/restore them. For full SQLite recovery, stop the server and back up the database file.
+Workspace backup downloads local account data, playbook, experiments, recent run traces and recent job history as JSON. Treat it as private prospect data; do not upload it to GitHub. Restore accepts SignalDesk JSON only, with explicit REPLACE confirmation. It validates every account, domain, flag, playbook and experiment count before one atomic database replacement. Invalid input leaves data unchanged; transaction failure rolls back deletions/inserts. Scores and review marks reset; drafts become restored-unverified; fetched research metadata is omitted and the evidence note/source are retained as unverified manual evidence; experiment stages reset to idea. Run/job history is not restored. Download the current backup before destructive replacement. For full SQLite recovery, stop the server and back up the database file.
 
 ## Distribution experiments
 
