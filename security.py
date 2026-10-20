@@ -42,3 +42,30 @@ def login(s,password,key):
 COOKIE='signaldesk_session={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200'
 def logout(s,h):
     with s.connect() as c:c.execute('DELETE FROM sessions WHERE id=?',(token_hash(cookie(h)),))
+
+def google_configured():return bool(os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET'))
+def owner_emails():return [e.strip().lower() for e in os.environ.get('SIGNALDESK_OWNER_EMAILS','').split(',') if e.strip()]
+def email_allowed(v):return not owner_emails() or str(v).strip().lower() in owner_emails()
+def google_start(s):
+    raw=secrets.token_urlsafe(24)
+    with s.connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('oauth-state-'+raw),json.dumps({'oauth':True,'expires':time.time()+600})))
+    from urllib.parse import urlencode
+    return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/auth/google/callback','response_type':'code','scope':'openid email profile','state':raw,'access_type':'online'})
+def google_finish(s,code,state):
+    if not code or not state:raise ValueError('Google sign-in was cancelled or failed. Try again.')
+    with s.connect() as c:
+        r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash('oauth-state-'+state),)).fetchone()
+        c.execute('DELETE FROM sessions WHERE id=?',(token_hash('oauth-state-'+state),))
+    if not r or json.loads(r[0])['expires']<time.time():raise ValueError('Sign-in link expired. Start again.')
+    import urllib.request,urllib.parse
+    body=urllib.parse.urlencode({'code':code,'client_id':os.environ['GOOGLE_CLIENT_ID'],'client_secret':os.environ['GOOGLE_CLIENT_SECRET'],'redirect_uri':origin()+'/api/auth/google/callback','grant_type':'authorization_code'}).encode()
+    try:
+        t=json.loads(urllib.request.urlopen(urllib.request.Request('https://oauth2.googleapis.com/token',data=body),timeout=15).read())
+        req=urllib.request.Request('https://openidconnect.googleapis.com/v1/userinfo',headers={'Authorization':'Bearer '+t['access_token']})
+        u=json.loads(urllib.request.urlopen(req,timeout=15).read())
+    except Exception:raise ValueError('Google sign-in failed. Try again.')
+    email=str(u.get('email','')).lower()
+    if not email or not u.get('email_verified') or not email_allowed(email):raise ValueError('This Google account is not authorized for this workspace.')
+    raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD',''))}
+    with s.connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
+    return raw,d

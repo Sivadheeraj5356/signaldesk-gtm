@@ -7,6 +7,72 @@
 /* Readable secondary text and compact mobile account cards. */
 p{color:#657389}.caption,td small,.stat small,.footer,.kv{color:#718098}.notice{color:#63718a}.step p{color:#68778e}.qualityline{color:#73819a}.stat span{color:#68768c}
 @media(max-width:650px){td{padding:0;border:0;font-size:12px}.step p{font-size:11px}.step b{font-size:12px}.notice{font-size:11px}.caption,td small{font-size:11px}.mobilemeta{font-size:10px}.stat small{font-size:10px}.stat span{font-size:11px}.footer{font-size:10px}.check label{font-size:12px}.trace b,.trace p{font-size:11px}.nav button{font-size:12px}.step{min-height:172px}.qualityline{font-size:10px}}
+
+/* Clay-style restyle: warm cream workspace, white surfaces, black pill actions, lime accent. */
+:root{--ink:#17171c;--muted:#6f6a5f;--bg:#f5f3ee;--line:#e7e2d8;--green:#17171c;--lime:#cdea44}
+body{background:var(--bg);color:var(--ink);letter-spacing:-.1px}
+.side{background:#faf8f3;color:var(--ink);border-right:1px solid var(--line)}
+.brand{color:var(--ink)}
+.logo{background:#17171c;color:var(--lime);border-radius:10px;box-shadow:none}
+.side .eyebrow{color:#a39d8f!important}
+.nav button{color:#6f6a5f;border-radius:999px}
+.nav button:hover{background:#efece4;color:var(--ink)}
+.nav button.active{background:#17171c;color:#fff;box-shadow:none}
+.workspace{background:#fff;border-color:var(--line);color:var(--ink)}
+.workspace p{color:#8a857a}
+.main{background:var(--bg)}
+.topbar{color:#8a857a;border-color:var(--line)}
+.topbar strong{color:#45413a}
+.topbar .pill{background:#fff;border:1px solid var(--line);color:#6f6a5f;border-radius:999px}
+.eyebrow{color:#8a857a}
+h1,h2,h3{color:var(--ink)}
+p{color:#6f6a5f}
+button,a.btn{border:1px solid #d9d4c8;background:#fff;color:#17171c;border-radius:999px;box-shadow:0 1px 2px #17171c0d}
+button:hover,.btn:hover{background:#f2efe8;border-color:#cfc9ba}
+.primary{background:#17171c!important;border-color:#17171c!important;color:#fff!important;box-shadow:none!important}
+.primary:hover{background:#33333a!important}
+.stat,.panel,.draftcard{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px #17171c0a}
+.stat:before{background:#cdea44}
+.stat:nth-child(2):before{background:#7ec8b8}
+.stat:nth-child(3):before{background:#f0b35c}
+.stat:nth-child(4):before{background:#a99ae0}
+.stat strong{color:var(--ink)}
+.stat span,.stat small{color:#8a857a}
+.steps{background:#fff;border:1px solid var(--line);border-radius:16px}
+.step{border-color:#efece4}
+.step .num{background:#f4f7d9;border:1px solid #e3ecc0;color:#5c6b1e;border-radius:8px}
+.step b{color:var(--ink)}
+.step p{color:#8a857a}
+.notice{background:#faf8f3;border:1px solid var(--line);color:#6f6a5f}
+.pill{background:#f4f7d9;color:#5c6b1e;border-radius:999px}
+th{background:#faf8f3;color:#8a857a;border-color:var(--line)}
+td{border-color:#f0ede5}
+td strong{color:var(--ink)}
+td small{color:#a39d8f}
+tr[data-id]:hover{background:#faf8f3}
+.score{color:#5c6b1e}
+.bar{background:#eeece4}
+.bar i{background:#b8d94a}
+.badge{background:#f4f7d9;border:1px solid #e3ecc0;color:#5c6b1e}
+input,select,textarea{background:#fbfaf7;border:1px solid #d9d4c8;border-radius:12px;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:0;border-color:#17171c;box-shadow:0 0 0 3px #17171c14}
+label{color:#45413a}
+.file{background:#faf8f3;border-color:#d9d4c8}
+.draftcard pre{background:#faf8f3;border:1px solid #efece4;color:#45413a}
+.trace{border-color:#e3ecc0}
+.trace b{color:#45413a}
+.trace p{color:#8a857a}
+dialog{border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 90px #17171c2e}
+dialog::backdrop{background:#17171c66;backdrop-filter:blur(3px)}
+.toast{background:#17171c;border:1px solid #33333a;color:#fff}
+.check input{accent-color:#17171c}
+.insight i{background:#f4f7d9;color:#5c6b1e}
+.automation-tag{border-left-color:#b8d94a}
+.kv,.log summary,.footer{color:#a39d8f}
+.empty strong{color:#45413a}
+.empty p{color:#a39d8f}
+@media(max-width:650px){.side{background:#faf8f3;border-bottom:1px solid var(--line)}.nav button.active{box-shadow:inset 0 -2px 0 #cdea44;background:#17171c;color:#fff}tr[data-id]{border-color:var(--line)}}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><span class="logo">⌁</span>SignalDesk</div><div><div class="eyebrow" style="margin:0 10px 12px;font-size:9px">Your GTM workspace</div><nav class="nav" aria-label="Workspace"><button data-tab="overview" class="active">◈ Overview</button><button data-tab="accounts">▦ Accounts</button><button data-tab="workflow">⌘ Workflow</button><button data-tab="drafts">✎ Review drafts</button><button data-tab="automation">⚡ Automation</button><button data-tab="campaigns">↗ Experiments</button><button data-tab="runs">↻ Run history</button></nav></div><div class="workspace"><strong>Private workspace / v0.4</strong><p>Data stays in your configured workspace.<br>No email delivery connected.</p></div><button id="signout" style="display:none" class="btn" onclick="api('/api/logout',{}).then(()=>location.reload())">Sign out</button></aside><main class="main"><header class="topbar"><span class="crumb">Workspace / <strong id="crumb">Overview</strong></span><span class="pill">Private · no sends</span></header><div id="page"></div><div class="footer"><span>SignalDesk / evidence before execution</span><span>Rule-based by default. Model setup is optional.</span></div></main></div><div id="toast" role="status" class="toast hidden"></div><dialog id="importDialog"><button class="close" aria-label="Close import" onclick="this.closest('dialog').close()">×</button><div class="eyebrow">Bring your own data</div><h1>Import accounts</h1><p>CSV is parsed locally. Duplicates are matched by company domain. An invalid row rejects the whole batch.</p><div class="notice">Required: company, domain. Optional: industry, region, size, contact, evidence, source, suppressed. Maximum 500 rows. Sources are supplied evidence, not verified enrichment.</div><div class="file" style="margin:16px 0"><label for="csvfile">Choose a CSV file</label><input type="file" id="csvfile" accept=".csv,text/csv"></div><label for="csvtext">Or paste CSV</label><textarea id="csvtext" rows="7" placeholder="company,domain,industry,region,size&#10;Your company,company.example,SaaS,India,40"></textarea><div class="actions" style="margin-top:18px"><button class="primary" id="doImport">Import accounts</button><button id="sampleCsv">Use fictional sample CSV</button></div></dialog><dialog id="detailDialog"></dialog><script>
 'use strict';

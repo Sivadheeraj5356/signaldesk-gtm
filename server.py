@@ -218,8 +218,20 @@ class Handler(BaseHTTPRequestHandler):
         if security.enabled():
             auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
             if self.path=='/api/auth':return self.send(200,{'authenticated':bool(auth),'csrf':auth['csrf'] if auth else None})
+            if self.path=='/api/auth/google/start':
+                if not security.google_configured():return self.send(400,{'error':'Google sign-in is not configured'})
+                self.send_response(302);self.send_header('Location',security.google_start(sys.modules[__name__]));self.send_header('Content-Length','0');self.end_headers();return
+            if self.path.startswith('/api/auth/google/callback'):
+                if not security.google_configured():return self.send(400,{'error':'Google sign-in is not configured'})
+                from urllib.parse import parse_qs
+                q=parse_qs(urlparse(self.path).query)
+                try:raw,_=security.google_finish(sys.modules[__name__],q.get('code',[''])[0],q.get('state',[''])[0])
+                except ValueError as e:return self.send(400,{'error':str(e)})
+                self.send_response(302);self.send_header('Location','/');self.send_header('Set-Cookie',security.COOKIE.format(raw));self.send_header('Content-Length','0');self.end_headers();return
             if not auth:
-                if self.path in ['/','/index.html']:return self.send(200,(ROOT/'login.html').read_text(),'text/html')
+                if self.path in ['/','/index.html']:
+                    page=(ROOT/'login.html').read_text().replace('__GOOGLE_ENABLED__','true' if security.google_configured() else 'false')
+                    return self.send(200,page,'text/html')
                 return self.send(401,{'error':'Sign in required'})
         if self.path=='/api/state': return self.send(200,state())
         if self.path=='/api/backup':
@@ -238,6 +250,7 @@ class Handler(BaseHTTPRequestHandler):
             if security.enabled():
                 if self.headers.get('Origin')!=security.origin():return self.send(403,{'error':'Same-origin request required'})
                 if self.path=='/api/login':
+                    if not security.email_allowed(d.get('email','')):return self.send(403,{'error':'This email is not authorized for this workspace'})
                     raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner')
                     return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
                 auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
