@@ -7,11 +7,11 @@ def enabled():return os.environ.get('SIGNALDESK_MODE','local')=='server'
 def validate():
     if not enabled():return
     from urllib.parse import urlparse
-    u=urlparse(os.environ.get('SIGNALDESK_ORIGIN',''))
+    u=urlparse(origin())
     if u.scheme!='https' or not u.netloc or u.path not in ['', '/']:raise ValueError('Server mode requires SIGNALDESK_ORIGIN=https://your-host')
     if len(os.environ.get('SIGNALDESK_PASSWORD',''))<16:raise ValueError('Server password must contain at least 16 characters')
     if not os.environ.get('DATABASE_URL') and not os.environ.get('SIGNALDESK_PERSISTENT_DISK')=='1':raise ValueError('Server mode needs DATABASE_URL or a confirmed persistent volume')
-def origin():return os.environ.get('SIGNALDESK_ORIGIN','').rstrip('/')
+def origin():return (os.environ.get('SIGNALDESK_ORIGIN') or os.environ.get('RENDER_EXTERNAL_URL','')).rstrip('/')
 def token_hash(v):return hashlib.sha256(v.encode()).hexdigest()
 def init(s):
     with s.connect() as c:c.execute('CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT NOT NULL)')
