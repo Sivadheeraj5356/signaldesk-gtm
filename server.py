@@ -13,7 +13,7 @@ DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
-    c.executescript('CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL);')
+    c.executescript('CREATE TABLE IF NOT EXISTS campaigns(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL);')
     return c
 def config():
     with connect() as c: r=c.execute('SELECT data FROM config WHERE id=1').fetchone()
@@ -114,11 +114,34 @@ def export():
         if a['approved'] and a['draft'] and not a['suppressed']: w.writerow([safe_cell(a.get(k)) for k in ['company','domain','contact','score','source','draft','engine']])
     return out.getvalue()
 
+def campaigns():
+    with connect() as c: return [json.loads(r[0]) for r in c.execute('SELECT data FROM campaigns ORDER BY rowid DESC')]
+
+def campaign_save(d):
+    title=text(d.get('title'),200)
+    if not title: raise ValueError('Campaign title is required')
+    channel=d.get('channel','content')
+    if channel not in ['content','community','partner','email','linkedin']:raise ValueError('Invalid channel')
+    stage=d.get('stage','idea')
+    if stage not in ['idea','ready','launched','learning']:raise ValueError('Invalid stage')
+    counts={k:int(d.get(k,0)) for k in ['impressions','responses','conversions']}
+    if any(x<0 for x in counts.values()) or counts['conversions']>counts['responses'] or counts['responses']>counts['impressions']:raise ValueError('Metrics must satisfy 0 <= conversions <= responses <= impressions')
+    cid=d.get('id') or str(uuid.uuid4())
+    old=next((c for c in campaigns() if c['id']==cid),None)
+    if d.get('id') and not old: raise ValueError('Campaign not found')
+    if stage=='launched' and not d.get('manual_launch_confirmed'):raise ValueError('Confirm that you launched it yourself outside this app')
+    c=dict(id=cid,title=title,channel=channel,stage=stage,hypothesis=text(d.get('hypothesis'),1000),copy=text(d.get('copy'),5000),learning=text(d.get('learning'),1000),updated=now(),**counts)
+    c['response_rate']=round(c['responses']/c['impressions']*100,2) if c['impressions'] else None
+    c['conversion_rate']=round(c['conversions']/c['responses']*100,2) if c['responses'] else None
+    with connect() as db:db.execute('INSERT OR REPLACE INTO campaigns VALUES(?,?)',(cid,json.dumps(c)))
+    return c
+
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    return dict(accounts=records(),config=config(),runs=runs,ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
+    return dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
 
 def action(path,d):
+    if path=='/api/campaign': return campaign_save(d)
     if path=='/api/research':
         a=next((a for a in records() if a['id']==d.get('id')),None)
         if not a: raise ValueError('Account not found')
