@@ -7,7 +7,7 @@ A single-owner GTM workspace for account research, qualification, draft preparat
 Use `render.yaml` on a free Render web service with a **separate durable PostgreSQL database** (for example a dedicated free Supabase project). Set these private environment variables in your host, never in Git:
 
 - `SIGNALDESK_MODE=server`
-- `SIGNALDESK_ORIGIN=https://your-actual-host` (exact public HTTPS origin)
+- `SIGNALDESK_ORIGIN=https://your-actual-host` (exact public HTTPS origin). On Render, leaving it empty uses Render's actual `RENDER_EXTERNAL_URL`.
 - `SIGNALDESK_PASSWORD` (at least 16 characters, randomly generated recommended)
 - `DATABASE_URL` (TLS PostgreSQL connection string, session-mode pooler supported)
 - `PGSSLROOTCERT` optionally points to your database CA. Default `supabase-ca.crt` is the public Supabase root downloaded from its dashboard. For another provider use its trusted CA or `system`; verification is never disabled.
@@ -126,7 +126,7 @@ npm run test:e2e
 SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 ```
 
-50 Python unit/API/job/restore/auth tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+52 Python unit/API/job/restore/auth tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
 
 The 0.3 UI uses original deep-navy navigation, a compact operational layout, clearer pipeline hierarchy, review states and responsive account cards. No external fonts/assets or analytics are loaded.
 
