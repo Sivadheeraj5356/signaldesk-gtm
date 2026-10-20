@@ -1,6 +1,8 @@
 """SignalDesk: local-only GTM workspace. Python 3.10+, standard library only."""
 import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, threading
 import research as public_research
+import jobs
+import sys
 PIPELINE_LOCK=threading.RLock()
 MODEL=None
 RESEARCH_LAST={}
@@ -13,7 +15,7 @@ DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
-    c.executescript('CREATE TABLE IF NOT EXISTS campaigns(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL);')
+    c.executescript('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS campaigns(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL);')
     return c
 def config():
     with connect() as c: r=c.execute('SELECT data FROM config WHERE id=1').fetchone()
@@ -25,6 +27,7 @@ def save(a):
 def text(v, n=4000): return str(v or '').strip()[:n]
 def domain(v):
     v=text(v,300).lower(); p=urlparse(v if '://' in v else 'https://'+v)
+    if p.scheme not in ['http','https'] or p.username or p.password or p.port not in [None,80,443]:raise ValueError('Company domain must not contain credentials or a nonstandard port')
     h=p.hostname or ''
     if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}',h) or '..' in h: raise ValueError('Enter a valid company domain, for example company.example')
     return h.removeprefix('www.')
@@ -92,17 +95,21 @@ def local_ai(a,cfg):
     if not result.startswith('Would ') or not result.endswith('?') or len(result)>500: raise ValueError('Local model did not return a complete bounded question')
     return draft(a,cfg)+'\n\nAI-suggested value question (review before use): '+result
 
+def prepare(a,cfg):
+    score,reasons=evaluate(a,cfg);a.update(score=score,reasons=reasons,approved=False,draft='',engine='rules',updated=now())
+    if not a['suppressed'] and score>=cfg['threshold']:
+        try:a.update(draft=local_ai(a,cfg) if cfg['ai'] else draft(a,cfg),engine=('gguf' if os.environ.get('SIGNALDESK_GGUF') else 'ollama') if cfg['ai'] else 'template')
+        except ValueError as e:a['engine']='error';reasons.append(dict(step='Draft failed',points=0,detail=str(e)))
+    return a
+
 def run():
-    cfg=config(); result=[]
+    cfg=config();result=[]
     for a in records():
-        score,reasons=evaluate(a,cfg); a.update(score=score,reasons=reasons,approved=False,draft='',engine='rules',updated=now())
-        if not a['suppressed'] and score>=cfg['threshold']:
-            try: a.update(draft=local_ai(a,cfg) if cfg['ai'] else draft(a,cfg),engine=('gguf' if os.environ.get('SIGNALDESK_GGUF') else 'ollama') if cfg['ai'] else 'template')
-            except ValueError as e: a['engine']='error'; reasons.append(dict(step='Draft failed',points=0,detail=str(e)))
-        save(a); result.append(dict(company=a['company'],score=score,engine=a['engine'],reasons=reasons))
+        a=prepare(a,cfg);save(a);result.append(dict(company=a['company'],score=a['score'],engine=a['engine'],reasons=a['reasons']))
     r=dict(id=str(uuid.uuid4()),at=now(),accounts=len(result),drafts=sum(x['engine'] in ['template','ollama','gguf'] for x in result),config=cfg,trace=result)
-    with connect() as c: c.execute('INSERT INTO runs VALUES(?,?,?)',(r['id'],r['at'],json.dumps(r)))
+    with connect() as c:c.execute('INSERT INTO runs VALUES(?,?,?)',(r['id'],r['at'],json.dumps(r)))
     return r
+
 
 def safe_cell(x):
     s=str(x if x is not None else '')
@@ -138,7 +145,7 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    return dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
+    return dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
 
 def action(path,d):
     if path=='/api/campaign': return campaign_save(d)
@@ -198,6 +205,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.trusted(): return self.send(403,{'error':'Local access only'})
         if self.path=='/api/state': return self.send(200,state())
+        if self.path=='/api/backup':
+            data=state();data.update(format='signaldesk-backup-v1',created=now());return self.send(200,data)
         if self.path=='/api/export': return self.send(200,export(),'text/csv')
         if self.path in ['/','/index.html']: return self.send(200,(ROOT/'index.html').read_text(),'text/html')
         return self.send(404,{'error':'Not found'})
@@ -208,10 +217,17 @@ class Handler(BaseHTTPRequestHandler):
             n=int(self.headers.get('Content-Length','0'))
             if not 0<n<=2000000: raise ValueError('Payload must be between 1 byte and 2 MB')
             d=json.loads(self.rfile.read(n))
-            with PIPELINE_LOCK: result=action(self.path,d)
+            if not isinstance(d,dict):raise ValueError('JSON body must be an object')
+            if self.path=='/api/jobs/start':
+                with PIPELINE_LOCK:result=jobs.start(sys.modules[__name__],d)
+            elif self.path=='/api/jobs/cancel':result=jobs.cancel(sys.modules[__name__],d.get('id'))
+            else:
+                with PIPELINE_LOCK:
+                    if jobs.active(sys.modules[__name__]):raise ValueError('A batch is active. Wait or cancel before changing workspace data.')
+                    result=action(self.path,d)
             return self.send(200,result)
         except (ValueError,KeyError,TypeError) as e: return self.send(400,{'error':str(e)})
         except Exception: return self.send(500,{'error':'Internal error; check local data and retry'})
 if __name__=='__main__':
-    port=int(os.environ.get('PORT','8787')); connect().close(); print(f'SignalDesk running at http://127.0.0.1:{port}',flush=True)
+    port=int(os.environ.get('PORT','8787')); connect().close();jobs.recover(sys.modules[__name__]); print(f'SignalDesk running at http://127.0.0.1:{port}',flush=True)
     ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
