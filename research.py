@@ -81,3 +81,20 @@ def research(url):
         return re.sub(r'(?:\+?\d[\d ()-]{8,}\d)', '[phone-like number omitted]',value)
     if not excerpt.strip():raise ValueError('No readable public content found')
     return dict(title=redact(' '.join(parser.title)[:300]),description=redact(parser.description),excerpt=excerpt,url=final,fetched_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),sha256=hashlib.sha256(data).hexdigest(),verified=False,method='Bounded public HTML fetch; no independent fact verification')
+
+
+def bounded_research(url,timeout=25):
+    """A separate process makes the deadline cover DNS and slow HTTP bodies too."""
+    import subprocess,sys,json
+    try:
+        r=subprocess.run([sys.executable,str(__file__),url],capture_output=True,text=True,timeout=timeout)
+    except subprocess.TimeoutExpired:raise ValueError('Research exceeded the 25-second total deadline; no evidence was replaced')
+    try:result=json.loads(r.stdout)
+    except Exception:raise ValueError('Research worker failed; no evidence was replaced')
+    if not result.get('ok'):raise ValueError(result.get('error','Research failed'))
+    return result['data']
+
+if __name__=='__main__':
+    import sys,json
+    try:print(json.dumps({'ok':True,'data':research(sys.argv[1])}))
+    except Exception as e:print(json.dumps({'ok':False,'error':str(e)[:300]}))
