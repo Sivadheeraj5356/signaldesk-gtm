@@ -4,7 +4,7 @@ SCHEMA='signaldesk'
 class Postgres:
     def __init__(self,url):
         import psycopg
-        self.c=psycopg.connect(url,connect_timeout=10,sslmode='require')
+        self.c=psycopg.connect(url,connect_timeout=10,sslmode='verify-full',sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
         self.c.execute('CREATE SCHEMA IF NOT EXISTS signaldesk')
         self.c.execute('SET search_path TO signaldesk')
         for table,cols in [('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL'),('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL')]:
