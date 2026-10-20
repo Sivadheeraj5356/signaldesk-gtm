@@ -28,3 +28,9 @@ class HostingTests(unittest.TestCase):
  def test_cookies(self):
   self.assertIn('HttpOnly',security.COOKIE);self.assertIn('Secure',security.COOKIE);self.assertIn('SameSite=Strict',security.COOKIE)
   self.assertIsNone(security.session(s,'signaldesk_session=invalid'))
+ def test_password_rotation_revokes_sessions(self):
+  raw,_=security.login(s,'a-long-test-password','owner')
+  with patch.dict(os.environ,{'SIGNALDESK_PASSWORD':'a-different-long-password'}):self.assertIsNone(security.session(s,'signaldesk_session='+raw))
+ def test_render_origin_fallback(self):
+  with patch.dict(os.environ,{'SIGNALDESK_ORIGIN':'','RENDER_EXTERNAL_URL':'https://actual-render.example'}):
+   security.validate();self.assertEqual(security.origin(),'https://actual-render.example')
