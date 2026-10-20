@@ -2,6 +2,7 @@
 import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, threading
 import research as public_research
 import jobs
+import backup
 import sys
 PIPELINE_LOCK=threading.RLock()
 MODEL=None
@@ -34,7 +35,7 @@ def domain(v):
 def clean(d):
     if not text(d.get('company')): raise ValueError('Company is required')
     size=d.get('size','')
-    if str(size).strip():
+    if size is not None and str(size).strip():
         try: size=int(size)
         except (ValueError,TypeError): raise ValueError('Company size must be a whole number')
         if size<0 or size>100000000: raise ValueError('Company size is out of range')
@@ -148,6 +149,7 @@ def state():
     return dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
 
 def action(path,d):
+    if path=='/api/restore':return backup.restore(sys.modules[__name__],d.get('backup'),d.get('confirmed'))
     if path=='/api/campaign': return campaign_save(d)
     if path=='/api/research':
         a=next((a for a in records() if a['id']==d.get('id')),None)
@@ -158,7 +160,7 @@ def action(path,d):
         if time.monotonic()-last<60: raise ValueError('Wait one minute between research requests for this domain')
         RESEARCH_LAST[a['domain']]=time.monotonic()
         url='https://'+a['domain']+'/'
-        try: result=public_research.research(url)
+        try: result=public_research.bounded_research(url)
         except ValueError: raise
         except Exception: raise ValueError('Public research failed or timed out. Existing evidence was preserved; use manual evidence instead.')
         a.update(source=result['url'],evidence=result['excerpt'],research=result,approved=False,draft='',score=None,reasons=[],updated=now())
@@ -215,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get_content_type()!='application/json': return self.send(415,{'error':'Use application/json'})
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=2000000: raise ValueError('Payload must be between 1 byte and 2 MB')
+            if not 0<n<=10000000: raise ValueError('Payload must be between 1 byte and 10 MB')
             d=json.loads(self.rfile.read(n))
             if not isinstance(d,dict):raise ValueError('JSON body must be an object')
             if self.path=='/api/jobs/start':
