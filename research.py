@@ -76,5 +76,8 @@ def research(url):
     content=re.sub(r'[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}', '[email omitted]',content)
     content=re.sub(r'(?:\+?\d[\d ()-]{8,}\d)', '[phone-like number omitted]',content)
     excerpt=content[:2200]
+    def redact(value):
+        value=re.sub(r'[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}', '[email omitted]',value)
+        return re.sub(r'(?:\+?\d[\d ()-]{8,}\d)', '[phone-like number omitted]',value)
     if not excerpt.strip():raise ValueError('No readable public content found')
-    return dict(title=' '.join(parser.title)[:300],description=parser.description,excerpt=excerpt,url=final,fetched_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),sha256=hashlib.sha256(data).hexdigest(),verified=False,method='Bounded public HTML fetch; no independent fact verification')
+    return dict(title=redact(' '.join(parser.title)[:300]),description=redact(parser.description),excerpt=excerpt,url=final,fetched_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),sha256=hashlib.sha256(data).hexdigest(),verified=False,method='Bounded public HTML fetch; no independent fact verification')
