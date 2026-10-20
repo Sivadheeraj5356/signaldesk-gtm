@@ -63,6 +63,22 @@ class CoreTests(unittest.TestCase):
     def test_invalid_ranges(self):
         cfg=s.DEFAULT.copy();cfg['min_size']=100;cfg['max_size']=10
         with self.assertRaises(ValueError):s.action('/api/config',cfg)
+    def test_research_private_destination(self):
+        import research
+        for url in ['http://example.com','https://127.0.0.1/','https://localhost/','https://169.254.169.254/','https://name.local/','https://user:pass@example.com/','https://example.com:8080/']:
+            with self.assertRaises(ValueError):research.public_target(url)
+    def test_research_parser_omits_script(self):
+        import research
+        p=research.PublicHTML();p.feed('<html><title>Demo</title><script>evil()</script><p>Real text</p></html>')
+        self.assertNotIn('evil()',p.parts);self.assertIn('Real text',p.parts)
+    def test_channels(self):
+        a=s.clean(self.row());cfg=s.DEFAULT.copy()
+        for channel in ['email','linkedin','partner']:
+            cfg['channel']=channel;self.assertIn('Demo',s.draft(a,cfg))
+    def test_research_supplied_failure_preserves_data(self):
+        s.import_rows([self.row()]);a=s.records()[0]
+        with self.assertRaises(ValueError):s.action('/api/research',{'id':a['id']})
+        self.assertEqual(s.records()[0]['evidence'],a['evidence'])
     def test_http_boundaries(self):
         server=s.ThreadingHTTPServer(('127.0.0.1',0),s.Handler);t=threading.Thread(target=server.serve_forever,daemon=True);t.start();base='http://127.0.0.1:'+str(server.server_port)
         try:
