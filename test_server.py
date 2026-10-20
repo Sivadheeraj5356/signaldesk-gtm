@@ -79,6 +79,17 @@ class CoreTests(unittest.TestCase):
         s.import_rows([self.row()]);a=s.records()[0]
         with self.assertRaises(ValueError):s.action('/api/research',{'id':a['id']})
         self.assertEqual(s.records()[0]['evidence'],a['evidence'])
+    def test_campaign_metrics(self):
+        c=s.campaign_save({'title':'Test','impressions':100,'responses':10,'conversions':2})
+        self.assertEqual(c['response_rate'],10);self.assertEqual(c['conversion_rate'],20)
+        self.assertEqual(len(s.campaigns()),1)
+    def test_campaign_no_fake_launch(self):
+        with self.assertRaises(ValueError):s.campaign_save({'title':'Test','stage':'launched'})
+        c=s.campaign_save({'title':'Test','stage':'launched','manual_launch_confirmed':True})
+        self.assertEqual(c['stage'],'launched')
+    def test_campaign_invalid_metrics(self):
+        with self.assertRaises(ValueError):s.campaign_save({'title':'Test','impressions':1,'responses':10})
+        c=s.campaign_save({'title':'Zero'});self.assertIsNone(c['response_rate'])
     def test_http_boundaries(self):
         server=s.ThreadingHTTPServer(('127.0.0.1',0),s.Handler);t=threading.Thread(target=server.serve_forever,daemon=True);t.start();base='http://127.0.0.1:'+str(server.server_port)
         try:
