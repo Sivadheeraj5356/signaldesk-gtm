@@ -30,10 +30,11 @@ Open **http://127.0.0.1:8787**. Click **Try sample data**, then **Run workflow**
 | Public homepage research, robots checks, bounded HTML, timestamp/hash | Implemented; actual example.com and Clay homepages fetched, not independent fact verification |
 | Manual account evidence note + source URL | User-supplied, not independently verified |
 | Email, LinkedIn and partnership templates, editing, suppression and review gate | Implemented and tested |
+| Distribution experiment board, manual funnel metrics and learning log | Implemented and tested, no automatic publishing/tracking |
 | SQLite persistence, run snapshots and CSV export | Implemented and tested |
 | Local GGUF AI value question | Actual Qwen 2.5 1.5B Q4 inference tested; optional install, human review required |
 | Local Ollama generation | Optional adapter implemented; Ollama-specific path not live-tested |
-| Email discovery/verification, enrichment waterfall, CRM sync, schedules, campaign delivery, analytics | Not implemented |
+| Email discovery/verification, enrichment waterfall, CRM sync, schedules, campaign delivery, automated analytics | Not implemented |
 | Multi-user auth, internet hosting, tenant isolation | Not implemented; do not expose this local server |
 
 ## Optional real local AI
@@ -98,7 +99,7 @@ npm run test:e2e
 SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 ```
 
-24 Python unit/API tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces and all five views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+27 Python unit/API tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all six views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
 
 ## Architecture
 
@@ -107,6 +108,10 @@ SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 `index.html`: dependency-free responsive application UI.
 
 `research.py`: bounded public homepage research. `test_server.py`: standard-library tests. `test_ai.py`: opt-in real GGUF inference test. `e2e.cjs`: optional Playwright browser test.
+
+## Distribution experiments
+
+The Experiments board stores marketing hypotheses, channel, content draft, manual launch state, manually entered impressions/responses/conversions and learning notes. Response rate = responses / impressions; conversion rate = conversions / responses. Zero denominators show no data. Counts must satisfy conversions <= responses <= impressions. Marking launched requires confirmation that you took the action outside the app. No publishing, tracking pixel or analytics service is connected. This is a simple funnel record, not unique-user attribution.
 
 ## Product direction
 
