@@ -9,3 +9,4 @@ exports/
 *.csv
 *.gguf
 models/
+artifacts/
