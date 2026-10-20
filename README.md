@@ -10,6 +10,7 @@ Use `render.yaml` on a free Render web service with a **separate durable Postgre
 - `SIGNALDESK_ORIGIN=https://your-actual-host` (exact public HTTPS origin)
 - `SIGNALDESK_PASSWORD` (at least 16 characters, randomly generated recommended)
 - `DATABASE_URL` (TLS PostgreSQL connection string, session-mode pooler supported)
+- `PGSSLROOTCERT` optionally points to your database CA. Default `supabase-ca.crt` is the public Supabase root downloaded from its dashboard. For another provider use its trusted CA or `system`; verification is never disabled.
 
 Install `pip install -r requirements.txt`; start `python server.py`. The process binds `0.0.0.0:$PORT` only in server mode. It refuses startup if HTTPS origin, password or durable storage configuration is missing. The host must terminate HTTPS. Do not expose the Python port directly without TLS. Health probe: `/healthz`.
 
@@ -27,9 +28,9 @@ Python 3.10+: `python3 server.py`. No database server, account, card or key need
 
 ## Evidence before execution.
 
-A local-first GTM preparation product for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
+A server-ready GTM preparation product for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
 
-## Run locally
+## Local quick start
 
 Python 3.10 or newer. No Python packages, API keys, credit card or cloud service required for the default template mode.
 
@@ -61,7 +62,7 @@ Open **http://127.0.0.1:8787**. Click **Try sample data**, then **Run workflow**
 | Local GGUF AI value question | Actual Qwen 2.5 1.5B Q4 inference tested; optional install, human review required |
 | Local Ollama generation | Optional adapter implemented; Ollama-specific path not live-tested |
 | Email discovery/verification, enrichment waterfall, CRM sync, schedules, campaign delivery, automated analytics | Not implemented |
-| Multi-user auth, internet hosting, tenant isolation | Not implemented; do not expose this local server |
+| Server hosting | Single-owner HTTPS deployment mode with login and durable PostgreSQL; multi-tenant isolation not implemented |
 
 ## Optional real local AI
 
@@ -104,7 +105,7 @@ Maximum 500 records per import, 2 MB CSV client limit, 10 MB HTTP JSON request l
 
 ## Safety and data
 
-- Binds to loopback only. Host and Origin checks protect local endpoints from routine cross-origin requests. No CORS allowance. This is a single-user local tool, not a production internet server.
+- Local mode binds loopback; server mode uses exact configured HTTPS Host/Origin plus owner sessions and CSRF checks. No CORS allowance. This is a single-owner pilot, not multi-tenant SaaS.
 - SQLite stays in `signaldesk.sqlite3`, or set `SIGNALDESK_DB` to another path. Do not commit your database or exported prospect data. Back up the database with the server stopped.
 - No telemetry, trackers, remote fonts, delivery credentials or send endpoint. Public homepage fetching happens only when explicitly requested. No background scraping or contact collection. Source links can still lead to unsafe content.
 - Edits, settings changes and reruns reset review marks. Suppressed records are excluded from drafts and exports. Changing suppression also resets review.
@@ -125,13 +126,13 @@ npm run test:e2e
 SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 ```
 
-45 Python unit/API/job/restore tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+50 Python unit/API/job/restore/auth tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
 
 The 0.3 UI uses original deep-navy navigation, a compact operational layout, clearer pipeline hierarchy, review states and responsive account cards. No external fonts/assets or analytics are loaded.
 
 ## Architecture
 
-`server.py`: local HTTP API, SQLite store, scoring, pipeline, templates and optional Ollama adapter.
+`server.py`: HTTP API, SQLite/PostgreSQL storage, scoring, pipeline, templates and optional Ollama adapter.
 
 `index.html`: dependency-free responsive application UI.
 
@@ -139,9 +140,9 @@ The 0.3 UI uses original deep-navy navigation, a compact operational layout, cle
 
 ## Automated account preparation
 
-In Automation, select 1-25 accounts, optionally refresh their public homepage evidence, then start a batch. The durable job snapshots the playbook, runs research -> scoring -> draft preparation sequentially, skips suppressed accounts, and records per-account results. Research failure preserves that account and skips draft regeneration instead of silently using stale evidence. Jobs continue while the local server runs, even with the browser closed. The UI refreshes active job status every three seconds; that local refresh does not re-fetch external websites. Server restart marks unfinished jobs interrupted, with no automatic retry. Cancel stops between steps; an in-flight request or local inference can finish first. Workspace writes are rejected while a batch is active to avoid racing edits against generated drafts.
+In Automation, select 1-25 accounts, optionally refresh their public homepage evidence, then start a batch. The durable job snapshots the playbook, runs research -> scoring -> draft preparation sequentially, skips suppressed accounts, and records per-account results. Research failure preserves that account and skips draft regeneration instead of silently using stale evidence. Jobs continue while the server runs, even with the browser closed. The UI refreshes active job status every three seconds; that workspace refresh does not re-fetch external websites. Server restart marks unfinished jobs interrupted, with no automatic retry. Cancel stops between steps; an in-flight request or local inference can finish first. Workspace writes are rejected while a batch is active to avoid racing edits against generated drafts.
 
-Workspace backup downloads local account data, playbook, experiments, recent run traces and recent job history as JSON. Treat it as private prospect data; do not upload it to GitHub. Restore accepts SignalDesk JSON only, with explicit REPLACE confirmation. It validates every account, domain, flag, playbook and experiment count before one atomic database replacement. Invalid input leaves data unchanged; transaction failure rolls back deletions/inserts. Scores and review marks reset; drafts become restored-unverified; fetched research metadata is omitted and the evidence note/source are retained as unverified manual evidence; experiment stages reset to idea. Run/job history is not restored. Download the current backup before destructive replacement. For full SQLite recovery, stop the server and back up the database file.
+Workspace backup downloads account data, playbook, experiments, recent run traces and recent job history as JSON. Treat it as private prospect data; do not upload it to GitHub. Restore accepts SignalDesk JSON only, with explicit REPLACE confirmation. It validates every account, domain, flag, playbook and experiment count before one atomic database replacement. Invalid input leaves data unchanged; transaction failure rolls back deletions/inserts. Scores and review marks reset; drafts become restored-unverified; fetched research metadata is omitted and the evidence note/source are retained as unverified manual evidence; experiment stages reset to idea. Run/job history is not restored. Download the current backup before destructive replacement. For full SQLite recovery, stop the server and back up the database file.
 
 ## Distribution experiments
 
