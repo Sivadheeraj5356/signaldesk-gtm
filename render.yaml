@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: signaldesk-gtm
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: SIGNALDESK_MODE
+        value: server
+      - key: SIGNALDESK_ORIGIN
+        sync: false
+      - key: SIGNALDESK_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        sync: false
