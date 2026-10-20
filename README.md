@@ -2,7 +2,7 @@
 
 ### Evidence before execution.
 
-A local-first GTM workspace for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
+A local-first GTM preparation product for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
 
 ## Run in one minute
 
@@ -31,7 +31,8 @@ Open **http://127.0.0.1:8787**. Click **Try sample data**, then **Run workflow**
 | Manual account evidence note + source URL | User-supplied, not independently verified |
 | Email, LinkedIn and partnership templates, editing, suppression and review gate | Implemented and tested |
 | Distribution experiment board, manual funnel metrics and learning log | Implemented and tested, no automatic publishing/tracking |
-| SQLite persistence, run snapshots and CSV export | Implemented and tested |
+| Durable asynchronous batch research -> scoring -> drafts, cancellation and restart recovery | Implemented and tested |
+| SQLite persistence, workspace JSON backup, run snapshots and CSV export | Implemented and tested |
 | Local GGUF AI value question | Actual Qwen 2.5 1.5B Q4 inference tested; optional install, human review required |
 | Local Ollama generation | Optional adapter implemented; Ollama-specific path not live-tested |
 | Email discovery/verification, enrichment waterfall, CRM sync, schedules, campaign delivery, automated analytics | Not implemented |
@@ -99,7 +100,7 @@ npm run test:e2e
 SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 ```
 
-27 Python unit/API tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all six views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
+36 Python unit/API/job tests plus one opt-in actual-model test cover scoring, dedupe, atomic imports, quoted CSV, persistence, opt-in AI failures, review invalidation, suppression, export safety, validation and HTTP origin/content-type boundaries. Browser E2E covers import, run, review/export gate, edit invalidation, reload persistence, search/filter, suppression, configuration, run traces, experiment create/update, manual launch guard and funnel arithmetic and all seven views at 320px/390px. Actual public-research + AI browser integration also passed: example.com homepage capture, provenance display, local GGUF inference, partnership draft, desktop and 320px review UI. No real contacts or sends are used. Set `CHROME_PATH` if Chrome is not at `/usr/bin/google-chrome`. Optional dependencies and model files need their own installation; the base app remains dependency-free.
 
 ## Architecture
 
@@ -107,7 +108,13 @@ SIGNALDESK_GGUF=/path/to/model.gguf npm run test:integration
 
 `index.html`: dependency-free responsive application UI.
 
-`research.py`: bounded public homepage research. `test_server.py`: standard-library tests. `test_ai.py`: opt-in real GGUF inference test. `e2e.cjs`: optional Playwright browser test.
+`jobs.py`: durable batch worker. `research.py`: bounded public homepage research. `test_server.py`: standard-library tests. `test_ai.py`: opt-in real GGUF inference test. `e2e.cjs`: optional Playwright browser test.
+
+## Automated account preparation
+
+In Automation, select 1-25 accounts, optionally refresh their public homepage evidence, then start a batch. The durable job snapshots the playbook, runs research -> scoring -> draft preparation sequentially, skips suppressed accounts, and records per-account results. Research failure preserves that account and skips draft regeneration instead of silently using stale evidence. Jobs continue while the local server runs, even with the browser closed. The UI refreshes active job status every three seconds; that local refresh does not re-fetch external websites. Server restart marks unfinished jobs interrupted, with no automatic retry. Cancel stops between bounded steps; an in-flight request or local inference can finish first. Workspace writes are rejected while a batch is active to avoid racing edits against generated drafts.
+
+Workspace backup downloads local account data, playbook, experiments, recent run traces and recent job history as JSON. Treat it as private prospect data; do not upload it to GitHub. This version exports backups but does not yet import/restore them. For full SQLite recovery, stop the server and back up the database file.
 
 ## Distribution experiments
 
