@@ -1,1 +1,1 @@
-{"name":"signaldesk-gtm","version":"0.1.0","private":true,"description":"Local-first GTM workspace","scripts":{"test:e2e":"node e2e.cjs"},"devDependencies":{"playwright":"^1.56.0"}}
+{"name":"signaldesk-gtm","version":"0.1.0","private":true,"description":"Local-first GTM workspace","scripts":{"test:e2e":"node e2e.cjs","test:integration":"node ai-research-e2e.cjs"},"devDependencies":{"playwright":"^1.56.0"}}
