@@ -3,6 +3,7 @@ import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, 
 import research as public_research
 import jobs
 import backup
+import security
 import sys
 PIPELINE_LOCK=threading.RLock()
 MODEL=None
@@ -15,9 +16,8 @@ DB = os.environ.get('SIGNALDESK_DB', str(ROOT / 'signaldesk.sqlite3'))
 DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=55, offer='Turn account research into a repeatable GTM workflow', cta='Would a short walkthrough be useful?', ai=False, channel='email')
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
-    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
-    c.executescript('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS campaigns(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL);')
-    return c
+    import storage
+    return storage.connect(DB)
 def config():
     with connect() as c: r=c.execute('SELECT data FROM config WHERE id=1').fetchone()
     return json.loads(r[0]) if r else DEFAULT.copy()
@@ -198,14 +198,29 @@ def action(path,d):
     raise ValueError('Unknown action')
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup();self.connection.settimeout(30)
     def log_message(self,*args): pass
     def trusted(self):
+        if security.enabled():
+            u=urlparse(security.origin())
+            return self.headers.get('Host')==u.netloc and (not self.headers.get('Origin') or self.headers.get('Origin')==security.origin())
         return self.headers.get('Host') in [f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'] and (not self.headers.get('Origin') or self.headers['Origin'] in [f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'])
-    def send(self,status,data,typ='application/json'):
+    def send(self,status,data,typ='application/json',cookie=None):
         b=data.encode() if isinstance(data,str) else json.dumps(data).encode(); self.send_response(status)
+        if cookie:self.send_header('Set-Cookie',cookie)
+        self.send_header('Referrer-Policy','no-referrer')
+        if security.enabled():self.send_header('Strict-Transport-Security','max-age=31536000')
         self.send_header('Content-Type',typ+'; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"); self.end_headers(); self.wfile.write(b)
     def do_GET(self):
+        if self.path=='/healthz': return self.send(200,{'ok':True})
         if not self.trusted(): return self.send(403,{'error':'Local access only'})
+        if security.enabled():
+            auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
+            if self.path=='/api/auth':return self.send(200,{'authenticated':bool(auth),'csrf':auth['csrf'] if auth else None})
+            if not auth:
+                if self.path in ['/','/index.html']:return self.send(200,(ROOT/'login.html').read_text(),'text/html')
+                return self.send(401,{'error':'Sign in required'})
         if self.path=='/api/state': return self.send(200,state())
         if self.path=='/api/backup':
             data=state();data.update(format='signaldesk-backup-v1',created=now());return self.send(200,data)
@@ -220,6 +235,16 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<n<=10000000: raise ValueError('Payload must be between 1 byte and 10 MB')
             d=json.loads(self.rfile.read(n))
             if not isinstance(d,dict):raise ValueError('JSON body must be an object')
+            if security.enabled():
+                if self.headers.get('Origin')!=security.origin():return self.send(403,{'error':'Same-origin request required'})
+                if self.path=='/api/login':
+                    raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner')
+                    return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
+                auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
+                if not auth:return self.send(401,{'error':'Sign in required'})
+                if not __import__('hmac').compare_digest(self.headers.get('X-CSRF-Token',''),auth['csrf']):return self.send(403,{'error':'Refresh your session and retry'})
+                if self.path=='/api/logout':
+                    security.logout(sys.modules[__name__],self.headers.get('Cookie'));return self.send(200,{'ok':True},cookie=security.COOKIE.format('')+'; Max-Age=0')
             if self.path=='/api/jobs/start':
                 with PIPELINE_LOCK:result=jobs.start(sys.modules[__name__],d)
             elif self.path=='/api/jobs/cancel':result=jobs.cancel(sys.modules[__name__],d.get('id'))
@@ -230,6 +255,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,result)
         except (ValueError,KeyError,TypeError) as e: return self.send(400,{'error':str(e)})
         except Exception: return self.send(500,{'error':'Internal error; check local data and retry'})
-if __name__=='__main__':
-    port=int(os.environ.get('PORT','8787')); connect().close();jobs.recover(sys.modules[__name__]); print(f'SignalDesk running at http://127.0.0.1:{port}',flush=True)
-    ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
+def main():
+    security.validate()
+    port=int(os.environ.get('PORT','8787')); connect().close()
+    if security.enabled():security.init(sys.modules[__name__])
+    jobs.recover(sys.modules[__name__])
+    host='0.0.0.0' if security.enabled() else '127.0.0.1'
+    print('SignalDesk listening on '+host+':'+str(port),flush=True)
+    ThreadingHTTPServer((host,port),Handler).serve_forever()
+if __name__=='__main__':main()
