@@ -1,6 +1,31 @@
 # SignalDesk
 
-### Evidence before execution.
+A single-owner GTM workspace for account research, qualification, draft preparation and human review. Server deployment is the default product path; local running is optional. No campaign delivery or CRM sync is implemented.
+
+## Server deployment (v0.4)
+
+Use `render.yaml` on a free Render web service with a **separate durable PostgreSQL database** (for example a dedicated free Supabase project). Set these private environment variables in your host, never in Git:
+
+- `SIGNALDESK_MODE=server`
+- `SIGNALDESK_ORIGIN=https://your-actual-host` (exact public HTTPS origin)
+- `SIGNALDESK_PASSWORD` (at least 16 characters, randomly generated recommended)
+- `DATABASE_URL` (TLS PostgreSQL connection string, session-mode pooler supported)
+
+Install `pip install -r requirements.txt`; start `python server.py`. The process binds `0.0.0.0:$PORT` only in server mode. It refuses startup if HTTPS origin, password or durable storage configuration is missing. The host must terminate HTTPS. Do not expose the Python port directly without TLS. Health probe: `/healthz`.
+
+Server mode adds a sign-in screen, opaque 12-hour sessions stored as hashes, HttpOnly/Secure/SameSite cookies, same-origin and CSRF checks, password-rotation session invalidation, a login-attempt cap, and no-store responses. It is one owner's workspace, **not multi-tenant SaaS**. Do not give unrelated customers access to the same password. There is no public signup, email login or password-reset flow. Change the host environment password to rotate access. Keep a backup outside the host before changing database settings.
+
+SQLite remains available on a real persistent volume: `docker compose up --build -d` after setting `SIGNALDESK_ORIGIN` and `SIGNALDESK_PASSWORD`. Compose binds only loopback; put a TLS reverse proxy in front. Initialize `/data` ownership for UID 10001 if your volume requires it. Never set `SIGNALDESK_PERSISTENT_DISK=1` on ephemeral storage: it is an operator assertion, not a durability detector.
+
+Free-host limits matter: Render sleeps after 15 minutes of inactivity and may take about a minute to wake. Its free filesystem is ephemeral, so do not use local SQLite there. Supabase free databases can pause after a week of inactivity, are limited to 500 MB and have no free automatic backups. Export backups regularly. This is a no-cost personal pilot, not an always-on SLA. Quota exhaustion can stop service. No paid tiers, trials or card are required by the intended route. Verify current host terms before enabling it.
+
+Jobs interrupted by a restart are marked interrupted; completed account work remains. There is one process/worker: do not horizontally scale this build. Managed free compute does not have a configured AI model. Template scoring/drafting and public homepage research work without paid APIs; AI stays explicitly disabled unless you install a model on compute you control. The local GGUF/Ollama options below do not magically access your laptop from a hosted server.
+
+## Optional local mode
+
+Python 3.10+: `python3 server.py`. No database server, account, card or key needed. It binds `127.0.0.1:8787` and retains local Host/Origin checks. Existing local SQLite workspaces are unchanged; no private workspace is automatically migrated to the hosted database.
+
+## Evidence before execution.
 
 A local-first GTM preparation product for turning account lists into scored, reviewable distribution drafts. Original software, inspired by the workflow category, not a Clay clone or a claim of feature parity. SignalDesk is a provisional working name.
 
