@@ -10,3 +10,6 @@ exports/
 *.gguf
 models/
 artifacts/
+
+.env
+.env.*
