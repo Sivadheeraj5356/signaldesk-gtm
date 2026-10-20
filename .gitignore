@@ -1,0 +1,9 @@
+*.sqlite3
+*.sqlite3-*
+*.db
+__pycache__/
+node_modules/
+.env
+.env.*
+exports/
+*.csv
