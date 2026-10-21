@@ -161,6 +161,10 @@ def set_approval(s, d):
     scope = d.get('recipient_scope', 'enrolled')
     if scope != 'enrolled': raise ValueError('Recipient scope must be the enrolled members of this campaign')
     if not camp['members']: raise ValueError('Enroll accounts before approving sends')
+    import connections
+    conn = connections.get(s, 'gmail')
+    if conn and conn['identity'] != sender:
+        raise ValueError('Approved sender must be the connected Gmail account (' + conn['identity'] + '). Connect that account or approve its address.')
     camp['send_approval'] = dict(sender=sender, recipient_scope=scope, confirmed_at=s.now())
     camp.setdefault('history', []).append(dict(at=s.now(), event='approval', detail='Send approval recorded for sender ' + sender))
     store(s, camp)
@@ -210,7 +214,7 @@ def send_step(s, d):
     if supplied and supplied != to: raise ValueError('Recipient must be the enrolled contact ' + to + ' - arbitrary recipients are out of scope')
     if not dry and not approval: raise ValueError('No operational approval on this campaign. Record sender, recipient scope and confirmation first.')
     sender = approval['sender'] if approval else '(dry-run: approval not recorded)'
-    result = senders.send(provider, sender, to, subject, body, ws=s.ws(), dry_run=dry)
+    result = senders.send(provider, sender, to, subject, body, ws=s.ws(), dry_run=dry, server=s)
     m['history'].append(dict(at=s.now(), event='send_' + ('dry_run' if dry else 'attempt'),
                              detail=result.get('note') or ('Delivered via ' + provider)))
     store(s, camp)

@@ -63,6 +63,34 @@ def google_start(s):
     with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('oauth-state-'+raw),json.dumps({'oauth':True,'expires':time.time()+600})))
     from urllib.parse import urlencode
     return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/auth/google/callback','response_type':'code','scope':'openid email profile','state':raw,'access_type':'online'})
+def gmail_connect_start(s,ws,email):
+    """OAuth consent for gmail.send on the SAME Google OAuth client as sign-in.
+    State nonce binds this workspace+user; offline access asks for a refresh token."""
+    if not google_configured():raise ValueError('Google OAuth client is not configured on this server')
+    raw=secrets.token_urlsafe(24)
+    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('gmail-connect-'+raw),json.dumps({'ws':ws,'email':email,'expires':time.time()+600})))
+    from urllib.parse import urlencode
+    return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/connect/gmail/callback','response_type':'code','scope':'https://www.googleapis.com/auth/gmail.send','state':raw,'access_type':'offline','prompt':'consent'})
+def gmail_connect_finish(s,code,state):
+    import connections
+    if not code or not state:raise ValueError('Google consent was cancelled or failed. Try again.')
+    with s.default_connect() as c:
+        r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash('gmail-connect-'+state),)).fetchone()
+        c.execute('DELETE FROM sessions WHERE id=?',(token_hash('gmail-connect-'+state),))
+    if not r:raise ValueError('Connection attempt expired or unknown. Start again.')
+    st=json.loads(r[0])
+    if st['expires']<time.time():raise ValueError('Connection attempt expired. Start again.')
+    import urllib.request,urllib.parse
+    body=urllib.parse.urlencode({'code':code,'client_id':os.environ['GOOGLE_CLIENT_ID'],'client_secret':os.environ['GOOGLE_CLIENT_SECRET'],'redirect_uri':origin()+'/api/connect/gmail/callback','grant_type':'authorization_code'}).encode()
+    try:
+        t=json.loads(urllib.request.urlopen(urllib.request.Request('https://oauth2.googleapis.com/token',data=body),timeout=15).read())
+    except Exception:raise ValueError('Google token exchange failed. Try again.')
+    if not t.get('refresh_token'):raise ValueError('Google did not return a refresh token. Revoke SignalDesk access in your Google account and connect again.')
+    s.CTX.ws=st['ws'];s.CTX.email=st['email']
+    identity=connections.verify_identity(t['access_token'])
+    if not identity:raise ValueError('Could not verify the connected Gmail address.')
+    conn=connections.save_gmail(s,identity,t['refresh_token'],t.get('access_token'),t.get('expires_in'))
+    return {'connected':identity,'ws':st['ws']}
 def google_finish(s,code,state):
     if not code or not state:raise ValueError('Google sign-in was cancelled or failed. Try again.')
     with s.default_connect() as c:
