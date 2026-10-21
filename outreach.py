@@ -143,3 +143,72 @@ def plan(s, d):
             action = 'Waiting for a reply or booking to be recorded'
         out.append(dict(company=m['company'], step=label, phase=m['phase'], next=action))
     return dict(campaign=camp['name'], dry_run=True, sent=0, members=out)
+
+
+# --- Provider-gated execution: sends and bookings ---------------------------
+import senders, bookers
+
+def set_approval(s, d):
+    """Record an operational approval on the campaign: the exact sender identity,
+    recipient scope and an explicit confirmation. Without this, providers dry-run only."""
+    camp = get(s, d.get('id'))
+    sender = s.text(d.get('sender'), 200).lower()
+    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', sender or ''): raise ValueError('Approval needs the exact sender email address')
+    if d.get('confirmed') is not True: raise ValueError('Approval needs an explicit confirmation')
+    scope = d.get('recipient_scope', 'enrolled')
+    if scope != 'enrolled': raise ValueError('Recipient scope must be the enrolled members of this campaign')
+    if not camp['members']: raise ValueError('Enroll accounts before approving sends')
+    camp['send_approval'] = dict(sender=sender, recipient_scope=scope, confirmed_at=s.now())
+    camp.setdefault('history', []).append(dict(at=s.now(), event='approval', detail='Send approval recorded for sender ' + sender))
+    store(s, camp)
+    return camp
+
+def revoke_approval(s, d):
+    camp = get(s, d.get('id'))
+    camp.pop('send_approval', None)
+    camp.setdefault('history', []).append(dict(at=s.now(), event='approval_revoked', detail='Send approval revoked; providers dry-run only'))
+    store(s, camp)
+    return camp
+
+def send_step(s, d):
+    """Send the current approved step draft for one member. Real sends require both a
+    configured provider and a recorded campaign approval; otherwise dry_run is forced."""
+    camp = get(s, d.get('id'))
+    m = _member(camp, d.get('account_id'))
+    provider = d.get('provider', 'mock')
+    dry = d.get('dry_run') is not False
+    approval = camp.get('send_approval')
+    if not dry:
+        if not approval: raise ValueError('No operational approval on this campaign. Record sender, recipient scope and confirmation first.')
+        state = senders.provider_state().get(provider, {})
+        if not state.get('configured'): raise ValueError(provider + ' provider is not configured. Dry-run is still available.')
+    if m['phase'] != 'awaiting_send': raise ValueError('This step has no reviewed draft ready to send')
+    if m['step'] == 0:
+        a = next((a for a in s.records() if a['id'] == m['account_id']), None)
+        body = (a or {}).get('draft', '')
+    else:
+        body = m['step_draft']
+    if not body: raise ValueError('No draft body for this step')
+    to = s.text(d.get('to'), 200)
+    if not to: raise ValueError('A recipient address is required (the app stores no contact emails; supply it per send)')
+    sender = approval['sender'] if approval else s.text(d.get('sender'), 200)
+    if not sender: raise ValueError('A sender address is required')
+    subject = s.text(d.get('subject'), 200) or (STEPS[m['step']][1] + ': ' + m['company'])
+    result = senders.send(provider, sender, to, subject, body, dry_run=dry)
+    m['history'].append(dict(at=s.now(), event='send_' + ('dry_run' if dry else 'attempt'),
+                             detail=result.get('note') or ('Delivered via ' + provider)))
+    store(s, camp)
+    return result
+
+def book_meeting(s, d):
+    """Create a booking through a provider. Real bookings require a configured provider
+    and the campaign approval; dry_run returns the exact request."""
+    camp = get(s, d.get('id'))
+    m = _member(camp, d.get('account_id'))
+    dry = d.get('dry_run') is not False
+    if not dry and not camp.get('send_approval'): raise ValueError('No operational approval on this campaign.')
+    result = bookers.book(d.get('event_type_id'), s.text(d.get('start'), 40),
+                          s.text(d.get('name'), 200) or m['company'], s.text(d.get('email'), 200), dry_run=dry)
+    m['history'].append(dict(at=s.now(), event='booking_' + ('dry_run' if dry else 'attempt'), detail=result.get('note', 'Booking created')))
+    store(s, camp)
+    return result

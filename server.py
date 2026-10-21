@@ -1,7 +1,7 @@
 """SignalDesk: local-only GTM workspace. Python 3.10+, standard library only."""
 import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, threading, time
 import research as public_research
-import jobs, outreach
+import jobs, outreach, senders, bookers
 import backup
 import security
 import sys
@@ -197,7 +197,7 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')))
+    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(),book_providers=bookers.provider_state())
     out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
     if ws()=='owner': out['grants']=grants()
     return out
@@ -239,6 +239,10 @@ def action(path,d):
     if path=='/api/outreach/approve': return outreach.approve_step(sys.modules[__name__],d)
     if path=='/api/outreach/mark': return outreach.mark(sys.modules[__name__],d)
     if path=='/api/outreach/plan': return outreach.plan(sys.modules[__name__],d)
+    if path=='/api/outreach/approve-send': return outreach.set_approval(sys.modules[__name__],d)
+    if path=='/api/outreach/revoke-send': return outreach.revoke_approval(sys.modules[__name__],d)
+    if path=='/api/outreach/send': return outreach.send_step(sys.modules[__name__],d)
+    if path=='/api/outreach/book': return outreach.book_meeting(sys.modules[__name__],d)
     if path=='/api/research':
         a=next((a for a in records() if a['id']==d.get('id')),None)
         if not a: raise ValueError('Account not found')
