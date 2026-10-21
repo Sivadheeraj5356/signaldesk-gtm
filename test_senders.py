@@ -152,12 +152,16 @@ def test_contact_email_validated(tmp_path, monkeypatch):
 
 def test_calcom_gates_and_dry_run(monkeypatch):
     monkeypatch.delenv('SIGNALDESK_CALCOM_API_KEY', raising=False)
-    with pytest.raises(ValueError): bookers.availability(1, '2026-10-24')
+    with pytest.raises(ValueError): bookers.availability(1, '2026-10-24', '2026-10-25')
     monkeypatch.setenv('SIGNALDESK_CALCOM_API_KEY', 'CAL-SECRET-555')
+    r = bookers.availability(42, '2026-10-24', '2026-10-25', timezone='Asia/Calcutta', dry_run=True)
+    assert r['request']['url'].startswith('https://api.cal.com/v2/slots?eventTypeId=42&start=2026-10-24&end=2026-10-25')
+    assert 'Asia%2FCalcutta' in r['request']['url']
     def boom(req, timeout=None): raise AssertionError('network must not be touched in dry-run')
     monkeypatch.setattr(bookers.urllib.request, 'urlopen', boom)
     r = bookers.book(42, '2026-10-24T10:00:00+05:30', 'Asia/Calcutta', 'Priya', 'priya@acme.example', dry_run=True)
     assert r['dry_run'] is True and r['request']['event_type_id'] == 42 and r['request']['timezone'] == 'Asia/Calcutta'
+    assert r['request']['url'] == 'https://api.cal.com/v2/bookings'
     # tenant workspace cannot use the operator env key
     with pytest.raises(ValueError) as e:
         bookers.book(42, '2026-10-24T10:00:00+05:30', 'Asia/Calcutta', 'Priya', 'priya@acme.example', ws='t-abc', dry_run=True)
