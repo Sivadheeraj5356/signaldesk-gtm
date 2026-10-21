@@ -11,20 +11,27 @@ email/account id, scopes: [], access_token_ref, refresh_token_ref, expires_at,
 status: active|expired|revoked, connected_at, updated_at}
 
 Tokens are never stored in the accounts/outreach tables, never logged, never
-returned by /api/state (state exposes identity + status only). Storage target:
-encrypted-at-rest column or an external secret store; plaintext in the tenant
-schema is the fallback only behind TLS + isolation, documented as a limitation.
+returned by /api/state (state exposes identity + status only). Storage is
+AES-256-GCM encrypted at rest in the workspace DB: key from SIGNALDESK_TOKEN_KEY
+(base64url 32 bytes) in deployed environments, or a generated 0600 key file next
+to the DB in local dev. DB backups carry ciphertext only; losing the key
+invalidates stored connections (reconnect required) and never exposes tokens.
+An external secret store remains a further hardening option, not a requirement.
 
 ## Connect flow (OAuth, durable - replaces static env token)
 
 1. Workspace owner clicks Connect Gmail -> GET /api/connect/gmail/start
-   - requires authenticated session + CSRF
-   - builds Google consent URL: scope gmail.send ONLY (sensitive scope),
-     state = signed nonce bound to workspace + session, PKCE
+   - requires authenticated session; state nonce (one-time, 10-min expiry,
+     bound to workspace + user) provides the callback CSRF defense
+   - builds Google consent URL: scopes openid + email + gmail.send (minimal:
+     identity plus send, no mailbox read), access_type=offline, prompt=consent,
+     PKCE S256
 2. Google consent -> GET /api/connect/gmail/callback
-   - verifies state nonce + workspace binding, exchanges code for tokens
-   - fetches gmail profile -> verified identity stored on the connection
-   - refresh_token stored; access_token cached with expiry
+   - verifies state nonce + workspace binding, exchanges code for tokens with
+     the PKCE verifier; requires a refresh_token in the response
+   - identity from the OIDC userinfo endpoint with email_verified required
+     (NOT gmail users.getProfile: gmail.send alone does not authorize it)
+   - refresh_token + access_token stored encrypted; access token cached w/expiry
 3. Send path uses connection.access_token, refreshing via refresh_token when
    expired (google token endpoint). Failure marks connection status=expired
    and sends refuse until reconnected. Reconnect repeats step 1.
