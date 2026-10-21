@@ -1,16 +1,18 @@
 const { chromium } = require('playwright');
-const fs = require('fs');
 (async () => {
   const b = await chromium.launch();
-  for (const enabled of [true,false]) {
-    const html = fs.readFileSync('login.html','utf8').replace('__GOOGLE_ENABLED__', enabled ? 'true' : 'false');
-    for (const [w,h,tag] of [[1280,900,'d'],[390,844,'m']]) {
-      const p = await (await b.newContext({viewport:{width:w,height:h}})).newPage();
-      await p.setContent(html, {waitUntil:'load'});
-      await p.waitForTimeout(300);
-      await p.screenshot({path:`/tmp/sd-login-${tag}${enabled?'-g':''}.png`});
-      await p.close();
-    }
-  }
+  const d = await (await b.newContext({viewport:{width:1440,height:900}})).newPage();
+  await d.goto('http://127.0.0.1:8787/',{waitUntil:'load',timeout:20000});
+  await d.waitForTimeout(1500);
+  await d.screenshot({path:'/tmp/fix-landing-d.png'});
+  await d.goto('http://127.0.0.1:8787/sign-in',{waitUntil:'load',timeout:20000});
+  await d.waitForTimeout(1200);
+  await d.screenshot({path:'/tmp/fix-signin-d.png'});
+  const m = await (await b.newContext({viewport:{width:390,height:844}})).newPage();
+  await m.goto('http://127.0.0.1:8787/',{waitUntil:'load',timeout:20000});
+  await m.waitForTimeout(1500);
+  await m.screenshot({path:'/tmp/fix-landing-m.png'});
+  const ov = await m.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  console.log('mobile overflow px:', ov);
   await b.close();
 })();
