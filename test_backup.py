@@ -1,4 +1,4 @@
-import unittest,tempfile,json,copy,sqlite3,time
+import unittest,tempfile,json,copy,sqlite3,time,os
 from pathlib import Path
 from unittest.mock import patch
 import server as s,backup,research
@@ -24,6 +24,7 @@ class BackupTests(unittest.TestCase):
     def test_duplicate_domain_rejected(self):
         bad=copy.deepcopy(self.data);a=copy.deepcopy(bad['accounts'][0]);a['id']='70c0c6f5-7984-4570-8a80-ce486e31f779';bad['accounts'].append(a)
         with self.assertRaises(ValueError):backup.restore(s,bad,True)
+    @unittest.skipIf(os.environ.get('SIGNALDESK_TEST_PG_URI'),'sqlite trigger syntax is sqlite-only')
     def test_database_failure_rolls_back_deletes_and_inserts(self):
         before=s.state()
         with s.connect() as c:c.execute("CREATE TRIGGER reject_restore BEFORE INSERT ON accounts BEGIN SELECT RAISE(ABORT, 'test simulated disk/write failure'); END")

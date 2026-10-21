@@ -7,12 +7,12 @@ class Postgres:
     def __init__(self,url,ws=None):
         import psycopg
         schema='signaldesk' if not ws or ws=='owner' else 'sd_'+re.sub('[^a-z0-9_]','_',str(ws))[:40]
-        self.c=psycopg.connect(url,connect_timeout=10,options='-c statement_timeout=15000 -c lock_timeout=5000',sslmode='verify-full',sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
+        self.c=psycopg.connect(url,connect_timeout=10,options='-c statement_timeout=15000 -c lock_timeout=5000',sslmode=os.environ.get('PGSSLMODE','verify-full'),sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
         self.c.execute('SET search_path TO '+schema)
         with LOCK:
             if (url,schema) not in READY:
                 self.c.execute('CREATE SCHEMA IF NOT EXISTS '+schema)
-                for table,cols in [('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL'),('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL')]:
+                for table,cols in [('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('outreach','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL'),('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL')]:
                     self.c.execute('CREATE TABLE IF NOT EXISTS '+table+' (rowid BIGSERIAL UNIQUE,'+cols+')')
                 self.c.commit();READY.add((url,schema))
             else:self.c.commit()
@@ -37,7 +37,7 @@ def connect(path,ws=None):
         safe=re.sub('[^a-z0-9_-]','_',str(ws))[:40]
         path=re.sub(r'(\.sqlite3)?$','',str(path))+'-'+safe+'.sqlite3'
     c=sqlite3.connect(path,timeout=15);c.row_factory=sqlite3.Row
-    for t,cols in [('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL')]:c.execute('CREATE TABLE IF NOT EXISTS '+t+'('+cols+')')
+    for t,cols in [('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('outreach','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL')]:c.execute('CREATE TABLE IF NOT EXISTS '+t+'('+cols+')')
     c.commit();return c
 def probe(path):
     token=os.urandom(6).hex()

@@ -16,6 +16,7 @@ class IsolationTests(unittest.TestCase):
     def row(self,**kw):
         d=dict(company='Demo',domain='demo.example',industry='SaaS',region='India',size=30,evidence='Supplied note',source='https://demo.example/news'); d.update(kw); return d
 
+    @unittest.skipIf(os.environ.get('SIGNALDESK_TEST_PG_URI'),'sqlite file assertion is sqlite-only')
     def test_owner_workspace_is_default_and_unchanged(self):
         self.assertEqual(s.ws(),'owner')
         s.import_rows([self.row()])

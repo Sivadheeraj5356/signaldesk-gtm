@@ -47,6 +47,11 @@ def login(s,password,key,email=''):
         c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
     return raw,d
 COOKIE='signaldesk_session={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200'
+def tenant_session(s,email,ws):
+    raw=secrets.token_urlsafe(40)
+    d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD','')),'email':str(email).strip().lower(),'ws':ws}
+    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
+    return raw,d
 def logout(s,h):
     with s.default_connect() as c:c.execute('DELETE FROM sessions WHERE id=?',(token_hash(cookie(h)),))
 
@@ -75,7 +80,11 @@ def google_finish(s,code,state):
     if not email or not u.get('email_verified'):raise ValueError('This Google account is not authorized for this workspace.')
     if email in owner_emails(): ws='owner'
     elif s.access_granted(email): ws='u_'+hashlib.sha256(email.encode()).hexdigest()[:16]
-    else: raise ValueError('This Google account is not authorized for this workspace. Access is granted by the workspace owner.')
+    else:
+        import accounts
+        existing=accounts.get(s,email)
+        if existing: ws=existing['ws']
+        else: ws=accounts.create(s,email,secrets.token_urlsafe(24))['ws']
     raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD','')),'email':email,'ws':ws}
     with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
     return raw,d

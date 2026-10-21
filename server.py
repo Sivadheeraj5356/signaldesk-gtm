@@ -1,7 +1,7 @@
 """SignalDesk: local-only GTM workspace. Python 3.10+, standard library only."""
-import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, threading
+import csv, io, json, os, re, sqlite3, uuid, datetime, hashlib, urllib.request, threading, time
 import research as public_research
-import jobs
+import jobs, outreach
 import backup
 import security
 import sys
@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 ROOT = Path(__file__).parent
 DB = os.environ.get('SIGNALDESK_DB', str(ROOT / 'signaldesk.sqlite3'))
-DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=55, offer='Turn account research into a repeatable GTM workflow', cta='Would a short walkthrough be useful?', ai=False, channel='email')
+DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=55, offer='Turn account research into a repeatable GTM workflow', cta='Would a short walkthrough be useful?', ai=False, ai_provider='local', ai_terms=False, channel='email', company_name='', company_website='', company_details='', linkedin='')
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
     import storage
@@ -26,10 +26,17 @@ def connect():
 def default_connect():
     import storage
     return storage.connect(DB, None)
+def connect_workspace(w):
+    import storage
+    return storage.connect(DB, w)
 def check_grant(auth):
     w=(auth or {}).get('ws')
     if not w or w=='owner': return True
-    return access_granted((auth or {}).get('email'))
+    email=(auth or {}).get('email')
+    if access_granted(email): return True
+    import accounts
+    u=accounts.get(sys.modules[__name__],email)
+    return bool(u and u['ws']==w)
 def access_granted(email):
     email=str(email or '').strip().lower()
     if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email): return False
@@ -118,10 +125,32 @@ def local_ai(a,cfg):
     if not result.startswith('Would ') or not result.endswith('?') or len(result)>500: raise ValueError('Local model did not return a complete bounded question')
     return draft(a,cfg)+'\n\nAI-suggested value question (review before use): '+result
 
+def gemini_ai(a,cfg):
+    key=os.environ.get('SIGNALDESK_GEMINI_API_KEY','')
+    if not key: raise ValueError('Gemini is not configured on this server. The operator sets SIGNALDESK_GEMINI_API_KEY.')
+    model=os.environ.get('SIGNALDESK_GEMINI_MODEL','gemini-flash-latest')
+    prompt='Rewrite the following seller offer as one short question to a prospective customer. Start with Would and end with ?. Do not add facts, company names, research or commentary. Offer: '+cfg['offer'][:350]
+    payload=json.dumps({'contents':[{'parts':[{'text':prompt}]}],'generationConfig':{'maxOutputTokens':80,'temperature':0.1}}).encode()
+    req=urllib.request.Request('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',
+                               data=payload,headers={'Content-Type':'application/json','x-goog-api-key':key})
+    try:
+        with urllib.request.urlopen(req,timeout=30) as r: data=json.loads(r.read(1000000))
+    except Exception: raise ValueError('Gemini request failed or timed out. Existing drafts were not changed.')
+    try: result=text(data['candidates'][0]['content']['parts'][0]['text'],1000).strip('"')
+    except Exception: raise ValueError('Gemini returned an unreadable response; no draft was changed.')
+    if not result.startswith('Would ') or not result.endswith('?') or len(result)>500:
+        raise ValueError('Gemini did not return a complete bounded question; review offer or retry')
+    # Same privacy contract as the local model: only the seller offer text leaves the
+    # workspace; research, contacts and lead data are never sent to the provider.
+    return draft(a,cfg)+'\n\nAI-suggested value question (review before use): '+result
+
 def prepare(a,cfg):
     score,reasons=evaluate(a,cfg);a.update(score=score,reasons=reasons,approved=False,draft='',engine='rules',updated=now())
     if not a['suppressed'] and score>=cfg['threshold']:
-        try:a.update(draft=local_ai(a,cfg) if cfg['ai'] else draft(a,cfg),engine=('gguf' if os.environ.get('SIGNALDESK_GGUF') else 'ollama') if cfg['ai'] else 'template')
+        try:
+            if not cfg['ai']: a.update(draft=draft(a,cfg),engine='template')
+            elif cfg.get('ai_provider')=='gemini': a.update(draft=gemini_ai(a,cfg),engine='gemini')
+            else: a.update(draft=local_ai(a,cfg),engine='gguf' if os.environ.get('SIGNALDESK_GGUF') else 'ollama')
         except ValueError as e:a['engine']='error';reasons.append(dict(step='Draft failed',points=0,detail=str(e)))
     return a
 
@@ -129,7 +158,7 @@ def run():
     cfg=config();result=[]
     for a in records():
         a=prepare(a,cfg);save(a);result.append(dict(company=a['company'],score=a['score'],engine=a['engine'],reasons=a['reasons']))
-    r=dict(id=str(uuid.uuid4()),at=now(),accounts=len(result),drafts=sum(x['engine'] in ['template','ollama','gguf'] for x in result),config=cfg,trace=result)
+    r=dict(id=str(uuid.uuid4()),at=now(),accounts=len(result),drafts=sum(x['engine'] in ['template','ollama','gguf','gemini'] for x in result),config=cfg,trace=result)
     with connect() as c:c.execute('INSERT INTO runs VALUES(?,?,?)',(r['id'],r['at'],json.dumps(r)))
     return r
 
@@ -168,7 +197,7 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
+    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')))
     out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
     if ws()=='owner': out['grants']=grants()
     return out
@@ -181,17 +210,23 @@ def action(path,d):
     if path=='/api/access':
         if ws()!='owner': raise ValueError('Only the workspace owner can manage access')
         email=str(d.get('email','')).strip().lower()
-        with default_connect() as c:
-            c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
-            if 'remove' in d:
+        if 'remove' in d:
+            with default_connect() as c:
+                c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
                 c.execute('DELETE FROM grants WHERE id=?',(email,))
-                try:
-                    for row in c.execute('SELECT id,data FROM sessions').fetchall():
+            # Session cleanup runs in its own sequential transaction: nested, it
+            # would lock sqlite; in the same transaction on Postgres, a failed
+            # statement would abort the grant deletion's commit too.
+            try:
+                with default_connect() as sc:
+                    for row in sc.execute('SELECT id,data FROM sessions').fetchall():
                         try: sd=json.loads(row[1])
                         except Exception: continue
-                        if sd.get('email')==email: c.execute('DELETE FROM sessions WHERE id=?',(row[0],))
-                except Exception: pass
-                return {'removed':email}
+                        if sd.get('email')==email: sc.execute('DELETE FROM sessions WHERE id=?',(row[0],))
+            except Exception: pass
+            return {'removed':email}
+        with default_connect() as c:
+            c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
             if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email): raise ValueError('Enter a valid email address')
             if email in security.owner_emails(): raise ValueError('Owner emails already have full access')
             g=dict(email=email,added=now(),note=text(d.get('note'),200))
@@ -199,6 +234,11 @@ def action(path,d):
             return g
     if path=='/api/restore':return backup.restore(sys.modules[__name__],d.get('backup'),d.get('confirmed'))
     if path=='/api/campaign': return campaign_save(d)
+    if path=='/api/outreach/create': return outreach.create(sys.modules[__name__],d)
+    if path=='/api/outreach/enroll': return outreach.enroll(sys.modules[__name__],d)
+    if path=='/api/outreach/approve': return outreach.approve_step(sys.modules[__name__],d)
+    if path=='/api/outreach/mark': return outreach.mark(sys.modules[__name__],d)
+    if path=='/api/outreach/plan': return outreach.plan(sys.modules[__name__],d)
     if path=='/api/research':
         a=next((a for a in records() if a['id']==d.get('id')),None)
         if not a: raise ValueError('Account not found')
@@ -213,6 +253,51 @@ def action(path,d):
         except Exception: raise ValueError('Public research failed or timed out. Existing evidence was preserved; use manual evidence instead.')
         a.update(source=result['url'],evidence=result['excerpt'],research=result,approved=False,draft='',score=None,reasons=[],updated=now())
         save(a); return result
+
+    if path=='/api/discover':
+        url=str(d.get('url','')).strip()
+        if not url: raise ValueError('Enter a public source URL')
+        from urllib.parse import urlparse as _up
+        host=(_up(url if '://' in url else 'https://'+url).hostname or '').lower()
+        import time
+        last=RESEARCH_LAST.get('discover:'+host,0)
+        if time.monotonic()-last<60: raise ValueError('Wait one minute between discovery requests for this source')
+        RESEARCH_LAST['discover:'+host]=time.monotonic()
+        import discover as disc
+        try: result=disc.discover_from_page(url)
+        except ValueError: raise
+        except Exception: raise ValueError('Discovery fetch failed or timed out. No candidates were imported.')
+        if not result['candidates']: raise ValueError('No outbound company links found on that page. Try a directory or list page.')
+        return result
+    if path=='/api/discover_icp':
+        import time
+        last=RESEARCH_LAST.get('discover_icp:'+ws(),0)
+        if time.monotonic()-last<60: raise ValueError('Wait one minute between discovery runs')
+        RESEARCH_LAST['discover_icp:'+ws()]=time.monotonic()
+        import providers
+        try: result=providers.icp_candidates(config())
+        except ValueError: raise
+        except Exception: raise ValueError('ICP discovery failed or timed out. No candidates were imported.')
+        if not result['candidates']: raise ValueError('No company candidates found for the current playbook. Broaden the industry or profile details, or use a source URL.')
+        return result
+    if path=='/api/enrich':
+        a=next((a for a in records() if a['id']==d.get('id')),None)
+        if not a: raise ValueError('Account not found')
+        if a['suppressed']: raise ValueError('Suppressed accounts are not enriched')
+        import time
+        last=RESEARCH_LAST.get('enrich:'+a['domain'],0)
+        if time.monotonic()-last<60: raise ValueError('Wait one minute between enrichment requests for this domain')
+        RESEARCH_LAST['enrich:'+a['domain']]=time.monotonic()
+        import enrich as contact_enrich
+        try: result=contact_enrich.contacts_for_domain(a['domain'])
+        except ValueError: raise
+        except Exception: raise ValueError('Contact discovery failed or timed out. Existing contacts were preserved.')
+        a['contacts']=result['contacts']; a['contacts_fetched_at']=result['fetched_at']
+        a['contacts_method']=result['method']; a['updated']=now()
+        save(a)
+        return {'account_id':a['id'],'domain':result['domain'],'contacts':result['contacts'],
+                'contact_count':len(result['contacts']),'pages_fetched':result['pages_fetched'],
+                'errors':result['errors'],'method':result['method']}
     if path=='/api/import':
         if 'csv' in d:
             reader=csv.DictReader(io.StringIO(d['csv']))
@@ -223,8 +308,17 @@ def action(path,d):
         cfg={k:d.get(k,v) for k,v in DEFAULT.items()}
         for k in ['min_size','max_size','threshold']: cfg[k]=int(cfg[k])
         if not 0<=cfg['threshold']<=100 or not 0<=cfg['min_size']<=cfg['max_size']: raise ValueError('Check score and size ranges')
-        for k in ['industry','region','offer','cta']: cfg[k]=text(cfg[k],500)
-        cfg['ai']=bool(cfg['ai'])
+        for k in ['industry','region','offer','cta','company_name','company_details']: cfg[k]=text(cfg[k],500)
+        cfg['company_website']=domain(cfg['company_website']) if text(cfg['company_website']) else ''
+        li=text(cfg['linkedin'],300)
+        if li and not re.fullmatch(r'https://(www\.)?linkedin\.com/(in|company)/[A-Za-z0-9_\-%.]+/?',li): raise ValueError('LinkedIn must be a full linkedin.com/in/ or linkedin.com/company/ URL')
+        cfg['linkedin']=li
+        cfg['ai']=cfg['ai'] in [True,'true','1','on',1]
+        if cfg.get('ai_provider') not in ['local','gemini']: cfg['ai_provider']='local'
+        cfg['ai_terms']=cfg.get('ai_terms') in [True,'true','1','on',1]
+        if cfg['ai'] and cfg['ai_provider']=='gemini':
+            if not os.environ.get('SIGNALDESK_GEMINI_API_KEY'): raise ValueError('Gemini is not configured on this server. The operator sets SIGNALDESK_GEMINI_API_KEY; no key is entered here.')
+            if not cfg['ai_terms']: raise ValueError('Confirm the Gemini terms acknowledgment before enabling cloud drafts: on the free tier, Google uses submitted content to improve its products and human reviewers may read it (https://ai.google.dev/gemini-api/terms). This request sends only the offer text; it does not include research, contacts or lead data.')
         if cfg.get('channel') not in ['email','linkedin','partner']: raise ValueError('Unknown distribution channel')
         with connect() as c:
             c.execute('INSERT OR REPLACE INTO config VALUES(1,?)',(json.dumps(cfg),))
@@ -303,9 +397,31 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(d,dict):raise ValueError('JSON body must be an object')
             if security.enabled():
                 if self.headers.get('Origin')!=security.origin():return self.send(403,{'error':'Same-origin request required'})
+                if self.path=='/api/signup':
+                    import accounts
+                    with security.LOCK:
+                        attempts=security.FAILURES.get('signup',[]);attempts=[x for x in attempts if time.time()-x<900]
+                        if len(attempts)>=8:return self.send(429,{'error':'Too many attempts. Wait 15 minutes.'})
+                        security.FAILURES['signup']=attempts+[time.time()]
+                    r=accounts.create(sys.modules[__name__],d.get('email'),d.get('password'))
+                    raw,_=security.tenant_session(sys.modules[__name__],r['email'],r['ws'])
+                    return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
                 if self.path=='/api/login':
-                    if not security.email_allowed(d.get('email','')):return self.send(403,{'error':'This email is not authorized for this workspace'})
-                    raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner',email=d.get('email',''))
+                    import accounts
+                    email=str(d.get('email','')).strip().lower()
+                    if accounts.get(sys.modules[__name__],email):
+                        with security.LOCK:
+                            attempts=security.FAILURES.get('tenant',[]);attempts=[x for x in attempts if time.time()-x<900]
+                            if len(attempts)>=8:return self.send(429,{'error':'Too many attempts. Wait 15 minutes.'})
+                        try:u=accounts.authenticate(sys.modules[__name__],email,d.get('password',''))
+                        except ValueError:
+                            with security.LOCK: security.FAILURES['tenant']=security.FAILURES.get('tenant',[])+[time.time()]
+                            raise
+                        with security.LOCK: security.FAILURES.pop('tenant',None)
+                        raw,_=security.tenant_session(sys.modules[__name__],u['email'],u['ws'])
+                        return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
+                    if not security.email_allowed(email):return self.send(403,{'error':'This email is not authorized for this workspace'})
+                    raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner',email=email)
                     return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
                 auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
                 if not auth:return self.send(401,{'error':'Sign in required'})
