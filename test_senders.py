@@ -19,7 +19,8 @@ def _setup_campaign(tmp_path, monkeypatch, approved=True):
     _mk(tmp_path, monkeypatch)
     server.action('/api/config', dict(server.DEFAULT, industry='SaaS', min_size=1, max_size=500,
                                       threshold=50, channel='email', offer='payroll automation'))
-    server.save(dict(id='a1', company='Acme', domain='acme.example', contact='Priya', evidence='n',
+    server.save(dict(id='a1', company='Acme', domain='acme.example', contact='Priya', contact_email='',
+                     subject='Intro: Acme payroll', evidence='n',
                      source='https://acme.example', industry='SaaS', region='India', size=30,
                      score=85, draft='Initial draft body', approved=True, suppressed=False,
                      reasons=[], engine='template', updated=''))
@@ -80,6 +81,12 @@ def test_send_step_gates(tmp_path, monkeypatch):
     assert 'contact email evidence' in str(e.value)
     server.action('/api/account', dict(id='a1', contact_email='priya@acme.example'))
     server.action('/api/account', dict(id='a1', approved=True))
+    # enrolled before binding: member has no bound recipient -> refused
+    # (enrollment happened in _setup_campaign before contact_email existed)
+    # rebind by re-creating the campaign with evidence present
+    cid2 = server.action('/api/outreach/create', dict(name='Q4b', channel='email', booking_link=''))['id']
+    server.action('/api/outreach/enroll', dict(id=cid2, account_ids=['a1']))
+    cid = cid2
     # arbitrary recipient substitution rejected even when it matches nothing bound
     with pytest.raises(ValueError) as e:
         server.action('/api/outreach/send', dict(id=cid, account_id='a1', provider='mock', to='someone-else@other.example', dry_run=True))
@@ -104,8 +111,34 @@ def test_send_step_uses_exact_approved_draft(tmp_path, monkeypatch):
     cid = _setup_campaign(tmp_path, monkeypatch)
     server.action('/api/account', dict(id='a1', contact_email='priya@acme.example'))
     server.action('/api/account', dict(id='a1', approved=True))
+    cid = server.action('/api/outreach/create', dict(name='Q4b', channel='email', booking_link=''))['id']
+    server.action('/api/outreach/enroll', dict(id=cid, account_ids=['a1']))
     r = server.action('/api/outreach/send', dict(id=cid, account_id='a1', provider='mock'))
-    assert r['intent']['body'] == 'Initial draft body'  # exact approved content, no subject/body overrides
+    assert r['intent']['body'] == 'Initial draft body'
+    assert r['intent']['subject'] == 'Intro: Acme payroll'  # reviewed subject, not derived
+
+def test_send_requires_reviewed_subject(tmp_path, monkeypatch):
+    cid = _setup_campaign(tmp_path, monkeypatch)
+    server.action('/api/account', dict(id='a1', contact_email='priya@acme.example', subject=''))
+    server.action('/api/account', dict(id='a1', approved=True))
+    cid = server.action('/api/outreach/create', dict(name='Q4b', channel='email', booking_link=''))['id']
+    server.action('/api/outreach/enroll', dict(id=cid, account_ids=['a1']))
+    with pytest.raises(ValueError) as e:
+        server.action('/api/outreach/send', dict(id=cid, account_id='a1', provider='mock'))
+    assert 'subject' in str(e.value).lower()
+
+def test_stale_contact_evidence_blocks_send(tmp_path, monkeypatch):
+    cid = _setup_campaign(tmp_path, monkeypatch)
+    server.action('/api/account', dict(id='a1', contact_email='priya@acme.example'))
+    server.action('/api/account', dict(id='a1', approved=True))
+    cid = server.action('/api/outreach/create', dict(name='Q4b', channel='email', booking_link=''))['id']
+    server.action('/api/outreach/enroll', dict(id=cid, account_ids=['a1']))
+    # contact evidence changes after enrollment: silent substitution must be blocked
+    server.action('/api/account', dict(id='a1', contact_email='rahul@acme.example'))
+    server.action('/api/account', dict(id='a1', approved=True))
+    with pytest.raises(ValueError) as e:
+        server.action('/api/outreach/send', dict(id=cid, account_id='a1', provider='mock'))
+    assert 'no silent substitution' in str(e.value)
 
 def test_contact_email_validated(tmp_path, monkeypatch):
     _mk(tmp_path, monkeypatch)
@@ -134,8 +167,11 @@ def test_booking_binds_invitee_and_slot(tmp_path, monkeypatch):
     cid = _setup_campaign(tmp_path, monkeypatch)
     with pytest.raises(ValueError) as e:
         server.action('/api/outreach/book', dict(id=cid, account_id='a1', event_type_id=42, start='2026-10-24T10:00:00+05:30', dry_run=True))
-    assert 'contact email evidence' in str(e.value)
+    assert 'bound contact email' in str(e.value)
     server.action('/api/account', dict(id='a1', contact_email='priya@acme.example'))
+    server.action('/api/account', dict(id='a1', approved=True))
+    cid = server.action('/api/outreach/create', dict(name='Q4b', channel='email', booking_link=''))['id']
+    server.action('/api/outreach/enroll', dict(id=cid, account_ids=['a1']))
     with pytest.raises(ValueError) as e:
         server.action('/api/outreach/book', dict(id=cid, account_id='a1', event_type_id=42, start='tomorrow morning', dry_run=True))
     assert 'ISO start time' in str(e.value)

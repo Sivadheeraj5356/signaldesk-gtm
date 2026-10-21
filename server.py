@@ -76,7 +76,7 @@ def clean(d):
     else: size=None
     source=text(d.get('source'),1000)
     if source and (urlparse(source).scheme not in ['http','https'] or not urlparse(source).netloc): raise ValueError('Evidence source must be an http(s) URL')
-    return dict(id=str(uuid.uuid4()),company=text(d.get('company'),200),domain=domain(d.get('domain','')),industry=text(d.get('industry'),100),region=text(d.get('region'),100),size=size,contact=text(d.get('contact'),200),contact_email=email_field(d.get('contact_email')),evidence=text(d.get('evidence')),source=source,suppressed=str(d.get('suppressed',False)).strip().lower() in ['true','1','yes'],score=None,reasons=[],draft='',approved=False,engine='',updated=now())
+    return dict(id=str(uuid.uuid4()),company=text(d.get('company'),200),domain=domain(d.get('domain','')),industry=text(d.get('industry'),100),region=text(d.get('region'),100),size=size,contact=text(d.get('contact'),200),contact_email=email_field(d.get('contact_email')),subject=text(d.get('subject'),200),evidence=text(d.get('evidence')),source=source,suppressed=str(d.get('suppressed',False)).strip().lower() in ['true','1','yes'],score=None,reasons=[],draft='',approved=False,engine='',updated=now())
 def import_rows(rows):
     current={a['domain'] for a in records()}; pending=[]; duplicates=0
     if len(rows)>500: raise ValueError('Import at most 500 rows per batch')
@@ -341,6 +341,7 @@ def action(path,d):
             with connect() as c: c.execute('DELETE FROM accounts WHERE id=?',(old['id'],))
             return {'deleted':True}
         if 'draft' in d: old.update(draft=text(d['draft'],8000),approved=False)
+        if 'subject' in d: old.update(subject=text(d['subject'],200),approved=False)
         if 'suppressed' in d: old.update(suppressed=bool(d['suppressed']),approved=False)
         if 'contact_email' in d: old.update(contact_email=email_field(d.get('contact_email')),approved=False)
         if 'approved' in d:

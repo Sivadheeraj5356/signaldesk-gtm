@@ -58,6 +58,7 @@ def enroll(s, d):
         camp['members'].append(dict(account_id=aid, company=a['company'], step=0, phase=phase,
                                     step_draft='', step_approved=False,
                                     recipient_email=a.get('contact_email') or '', recipient_name=a.get('contact') or '',
+                                    recipient_bound_at=s.now(),
                                     history=[dict(at=s.now(), event='enrolled', detail='Enrolled at step 1: Initial outreach')]))
         added.append(aid)
     store(s, camp)
@@ -111,6 +112,7 @@ def mark(s, d):
         if m['step'] < len(STEPS) - 1:
             m['step'] += 1
             m['step_draft'] = step_draft_text(s, a, s.config(), STEPS[m['step']][0], camp.get('booking_link'))
+            m['step_subject'] = STEPS[m['step']][1] + ': ' + m['company']
             m['step_approved'] = False; m['phase'] = 'awaiting_review'
             m['history'].append(dict(at=s.now(), event='drafted', detail=STEPS[m['step']][1] + ' draft prepared for review'))
         else:
@@ -186,22 +188,28 @@ def send_step(s, d):
     if m['phase'] != 'awaiting_send': raise ValueError('This step has no reviewed draft ready to send')
     a = next((a for a in s.records() if a['id'] == m['account_id']), None)
     if m['step'] == 0:
-        body = (a or {}).get('draft', '')
         if not (a and a.get('approved')): raise ValueError('The initial draft must be reviewed before sending')
+        body = (a or {}).get('draft', '')
+        subject = ((a or {}).get('subject') or '').strip()
+        if not subject: raise ValueError('The initial draft has no subject. Review the draft and set the exact subject line first - it is recipient-visible content.')
     else:
         if not m['step_approved']: raise ValueError('The step draft must be reviewed before sending')
         body = m['step_draft']
+        subject = (m.get('step_subject') or '').strip()
+        if not subject: raise ValueError('This step has no reviewed subject line')
     if not body: raise ValueError('No draft body for this step')
-    # Recipient binds to the enrolled member's contact evidence, refreshed from the
-    # account record. An arbitrary per-send address is never accepted: if the caller
-    # supplies one it must equal the bound address.
-    to = ((a or {}).get('contact_email') or m.get('recipient_email') or '').lower()
-    if not to: raise ValueError('This account has no contact email evidence. Add a contact email on the account and re-review before sending.')
+    # Recipient binds immutably to the address reviewed at enrollment. If the account's
+    # contact evidence changed since, this member's binding is stale: re-enroll instead
+    # of silently substituting a different mailbox.
+    to = (m.get('recipient_email') or '').lower()
+    if not to: raise ValueError('This member has no bound contact email. Bind one at enrollment after adding contact email evidence to the account.')
+    current = ((a or {}).get('contact_email') or '').lower()
+    if current and current != to:
+        raise ValueError('Account contact evidence changed after enrollment (' + to + ' was bound). Review and re-enroll to rebind - no silent substitution.')
     supplied = s.text(d.get('to'), 200).lower()
     if supplied and supplied != to: raise ValueError('Recipient must be the enrolled contact ' + to + ' - arbitrary recipients are out of scope')
     if not dry and not approval: raise ValueError('No operational approval on this campaign. Record sender, recipient scope and confirmation first.')
     sender = approval['sender'] if approval else '(dry-run: approval not recorded)'
-    subject = STEPS[m['step']][1] + ': ' + m['company']
     result = senders.send(provider, sender, to, subject, body, ws=s.ws(), dry_run=dry)
     m['history'].append(dict(at=s.now(), event='send_' + ('dry_run' if dry else 'attempt'),
                              detail=result.get('note') or ('Delivered via ' + provider)))
@@ -216,9 +224,12 @@ def book_meeting(s, d):
     dry = d.get('dry_run') is not False
     if not dry and not camp.get('send_approval'): raise ValueError('No operational approval on this campaign.')
     a = next((a for a in s.records() if a['id'] == m['account_id']), None)
-    invitee_email = ((a or {}).get('contact_email') or m.get('recipient_email') or '').lower()
-    if not invitee_email: raise ValueError('This account has no contact email evidence to invite')
-    invitee_name = ((a or {}).get('contact') or m.get('recipient_name') or m['company'])[:200]
+    invitee_email = (m.get('recipient_email') or '').lower()
+    if not invitee_email: raise ValueError('This member has no bound contact email to invite')
+    current = ((a or {}).get('contact_email') or '').lower()
+    if current and current != invitee_email:
+        raise ValueError('Account contact evidence changed after enrollment. Review and re-enroll to rebind - no silent substitution.')
+    invitee_name = (m.get('recipient_name') or (a or {}).get('contact') or m['company'])[:200]
     start = s.text(d.get('start'), 40)
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:?\d{2})', start or ''):
         raise ValueError('Booking needs an explicit ISO start time with offset, e.g. 2026-10-24T10:00:00+05:30')
