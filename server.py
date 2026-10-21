@@ -211,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
         if cookie:self.send_header('Set-Cookie',cookie)
         self.send_header('Referrer-Policy','no-referrer')
         if security.enabled():self.send_header('Strict-Transport-Security','max-age=31536000')
-        self.send_header('Content-Type',typ+'; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"); self.end_headers(); self.wfile.write(b)
+        self.send_header('Content-Type',typ+'; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"); self.end_headers(); self.wfile.write(b)
     def do_GET(self):
         if self.path=='/healthz': return self.send(200,{'ok':True})
         if not self.trusted(): return self.send(403,{'error':'Local access only'})
@@ -229,7 +229,9 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as e:return self.send(400,{'error':str(e)})
                 self.send_response(302);self.send_header('Location','/');self.send_header('Set-Cookie',security.COOKIE.format(raw));self.send_header('Content-Length','0');self.end_headers();return
             if not auth:
-                if self.path in ['/','/index.html']:
+                if self.path=='/':
+                    return self.send(200,(ROOT/'landing.html').read_text(),'text/html')
+                if self.path in ['/sign-in','/index.html']:
                     page=(ROOT/'login.html').read_text().replace('__GOOGLE_ENABLED__','true' if security.google_configured() else 'false')
                     return self.send(200,page,'text/html')
                 return self.send(401,{'error':'Sign in required'})

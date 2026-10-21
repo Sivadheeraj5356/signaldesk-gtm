@@ -1,22 +1,24 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in | SignalDesk</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f3ee;color:#17171c;font:16px/1.5 -apple-system,"Segoe UI",Inter,Roboto,system-ui,sans-serif;padding:24px;-webkit-font-smoothing:antialiased}
-.card{width:100%;max-width:420px;background:#fff;border:1px solid #e7e2d8;border-radius:24px;padding:40px 36px 28px;box-shadow:0 1px 2px #17171c0d,0 12px 32px -12px #17171c14}
-.brand{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:700;letter-spacing:-.02em;margin-bottom:34px}.brand .dot{width:11px;height:11px;border-radius:50%;background:#cdea44;box-shadow:inset 0 0 0 2.5px #17171c}
-h1{font-size:27px;font-weight:650;letter-spacing:-.03em;line-height:1.2;margin:0 0 10px}
-.sub{color:#6f6a5f;font-size:14.5px;margin:0 0 28px}
-.google{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:11px;border:1px solid #d9d4c8;border-radius:999px;background:#fff;color:#17171c;font:600 14.5px inherit;text-decoration:none;cursor:pointer;transition:background .15s}.google:hover{background:#f8f6f1}
-.or{display:flex;align-items:center;gap:12px;color:#a39d8f;font-size:12.5px;margin:20px 0}.or:before,.or:after{content:"";flex:1;height:1px;background:#e7e2d8}
-label{display:block;font-size:13px;font-weight:600;color:#45413a;margin:0 0 6px}
-input{width:100%;padding:11px 14px;border:1px solid #d9d4c8;border-radius:12px;background:#fbfaf7;color:#17171c;font:inherit;font-size:14.5px;outline:none;transition:border-color .15s,box-shadow .15s}input:focus{border-color:#17171c;box-shadow:0 0 0 3px #17171c14}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in | SignalDesk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fafafa;color:#18181b;font:16px/1.6 "DM Sans",-apple-system,"Segoe UI",system-ui,sans-serif;padding:24px;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:420px;background:#fff;border:1px solid #e4e4e7;border-radius:22px;padding:40px 36px 28px;box-shadow:0 1px 2px #18181b0d,0 24px 60px -30px #18181b1f}
+.brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:34px;text-decoration:none;color:#18181b}.brand i{width:27px;height:27px;border-radius:7px;background:#18181b;display:grid;place-items:center;font-style:normal}.brand svg{width:14px;height:14px}
+h1{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.2;margin:0 0 10px}
+.sub{color:#71717a;font-size:14.5px;margin:0 0 28px}
+.google{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:11px;border:1px solid #d4d4d8;border-radius:999px;background:#fff;color:#18181b;font:600 14.5px inherit;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s}.google:hover{background:#fafafa;border-color:#a1a1aa}
+.or{display:flex;align-items:center;gap:12px;color:#a1a1aa;font-size:12.5px;margin:20px 0}.or:before,.or:after{content:"";flex:1;height:1px;background:#e4e4e7}
+label{display:block;font-size:13px;font-weight:600;color:#3f3f46;margin:0 0 6px}
+input{width:100%;padding:11px 14px;border:1px solid #d4d4d8;border-radius:10px;background:#fff;color:#18181b;font:inherit;font-size:14.5px;outline:none;transition:border-color .15s,box-shadow .15s}input:focus{border-color:#18181b;box-shadow:0 0 0 3px #18181b14}
 .field{margin-bottom:14px}
-button{width:100%;margin-top:6px;border:0;border-radius:999px;background:#17171c;color:#fff;padding:12px;font:600 14.5px inherit;cursor:pointer;transition:opacity .15s}button:hover{opacity:.88}button:disabled{opacity:.5;cursor:default}
+button{width:100%;margin-top:6px;border:0;border-radius:999px;background:#18181b;color:#fff;padding:12px;font:600 14.5px inherit;cursor:pointer;transition:background .15s}button:hover{background:#3f3f46}button:disabled{opacity:.5;cursor:default}
 #error{color:#b3341f;font-size:13px;min-height:18px;margin:10px 0 0;text-align:center}
-.foot{color:#a39d8f;font-size:12px;text-align:center;margin:22px 0 0}
+.foot{color:#a1a1aa;font-size:12px;text-align:center;margin:22px 0 0}.foot a{color:#71717a}
 </style></head><body>
 <main class="card">
-<div class="brand"><span class="dot"></span>SignalDesk</div>
-<h1>Your private GTM workspace</h1>
-<p class="sub">Research, qualify and prepare. Sign in to access your accounts and reviewed drafts.</p>
+<a class="brand" href="/"><i><svg viewBox="0 0 24 24" fill="none"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" fill="#fff"/></svg></i>SignalDesk</a>
+<h1>Sign in to your workspace</h1>
+<p class="sub">Research, qualify and prepare. Your accounts and reviewed drafts are waiting.</p>
 <a class="google" id="google" href="/api/auth/google/start" hidden><svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.7-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 18.9 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.2-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C41 35.4 44 30.2 44 24c0-1.3-.1-2.7-.4-3.9z"/></svg>Continue with Google</a>
 <div class="or" id="ordiv" hidden>or</div>
 <form>
@@ -25,10 +27,10 @@ button{width:100%;margin-top:6px;border:0;border-radius:999px;background:#17171c
 <button>Sign in</button>
 <p id="error" role="alert"></p>
 </form>
-<p class="foot">Single-owner access. Nothing is sent or published from this workspace.</p>
+<p class="foot">Access is by approval while in early access. <a href="/">Back to home</a></p>
 </main>
 <script>
 if(__GOOGLE_ENABLED__){document.querySelector('#google').hidden=false;document.querySelector('#ordiv').hidden=false}
 document.querySelector('form').onsubmit=async e=>{e.preventDefault();const b=document.querySelector('button');b.disabled=true;document.querySelector('#error').textContent='';
-try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.querySelector('#email').value,password:document.querySelector('#password').value})});const j=await r.json();if(!r.ok)throw Error(j.error);location.reload()}catch(e){document.querySelector('#error').textContent=e.message}finally{b.disabled=false}}
+try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.querySelector('#email').value,password:document.querySelector('#password').value})});const j=await r.json();if(!r.ok)throw Error(j.error);location.href='/'}catch(e){document.querySelector('#error').textContent=e.message}finally{b.disabled=false}}
 </script></body></html>
