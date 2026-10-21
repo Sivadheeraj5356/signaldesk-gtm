@@ -32,7 +32,7 @@ def access_granted(email):
 def grants():
     with default_connect() as c:
         c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
-        return [json.loads(r[0]) for r in c.execute('SELECT data FROM grants ORDER BY rowid')]
+        return [json.loads(r[0]) for r in c.execute('SELECT data FROM grants ORDER BY id')]
 def config():
     with connect() as c: r=c.execute('SELECT data FROM config WHERE id=1').fetchone()
     return json.loads(r[0]) if r else DEFAULT.copy()
