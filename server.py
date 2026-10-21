@@ -55,6 +55,11 @@ def records():
 def save(a):
     with connect() as c: c.execute('INSERT OR REPLACE INTO accounts VALUES(?,?)',(a['id'],json.dumps(a)))
 def text(v, n=4000): return str(v or '').strip()[:n]
+def email_field(v):
+    v=str(v or '').strip().lower()
+    if not v: return ''
+    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',v): raise ValueError('Invalid contact email')
+    return v[:200]
 def domain(v):
     v=text(v,300).lower(); p=urlparse(v if '://' in v else 'https://'+v)
     if p.scheme not in ['http','https'] or p.username or p.password or p.port not in [None,80,443]:raise ValueError('Company domain must not contain credentials or a nonstandard port')
@@ -71,7 +76,7 @@ def clean(d):
     else: size=None
     source=text(d.get('source'),1000)
     if source and (urlparse(source).scheme not in ['http','https'] or not urlparse(source).netloc): raise ValueError('Evidence source must be an http(s) URL')
-    return dict(id=str(uuid.uuid4()),company=text(d.get('company'),200),domain=domain(d.get('domain','')),industry=text(d.get('industry'),100),region=text(d.get('region'),100),size=size,contact=text(d.get('contact'),200),evidence=text(d.get('evidence')),source=source,suppressed=str(d.get('suppressed',False)).strip().lower() in ['true','1','yes'],score=None,reasons=[],draft='',approved=False,engine='',updated=now())
+    return dict(id=str(uuid.uuid4()),company=text(d.get('company'),200),domain=domain(d.get('domain','')),industry=text(d.get('industry'),100),region=text(d.get('region'),100),size=size,contact=text(d.get('contact'),200),contact_email=email_field(d.get('contact_email')),evidence=text(d.get('evidence')),source=source,suppressed=str(d.get('suppressed',False)).strip().lower() in ['true','1','yes'],score=None,reasons=[],draft='',approved=False,engine='',updated=now())
 def import_rows(rows):
     current={a['domain'] for a in records()}; pending=[]; duplicates=0
     if len(rows)>500: raise ValueError('Import at most 500 rows per batch')
@@ -197,7 +202,7 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(),book_providers=bookers.provider_state())
+    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(ws()),book_providers=bookers.provider_state(ws()))
     out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
     if ws()=='owner': out['grants']=grants()
     return out
@@ -337,6 +342,7 @@ def action(path,d):
             return {'deleted':True}
         if 'draft' in d: old.update(draft=text(d['draft'],8000),approved=False)
         if 'suppressed' in d: old.update(suppressed=bool(d['suppressed']),approved=False)
+        if 'contact_email' in d: old.update(contact_email=email_field(d.get('contact_email')),approved=False)
         if 'approved' in d:
             if d['approved'] and (not old['draft'] or old['suppressed']): raise ValueError('A non-suppressed draft is required')
             old['approved']=bool(d['approved'])

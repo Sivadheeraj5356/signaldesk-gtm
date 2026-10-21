@@ -57,6 +57,7 @@ def enroll(s, d):
         phase = 'awaiting_send' if (a.get('draft') and a.get('approved')) else ('awaiting_review' if a.get('draft') else 'awaiting_draft')
         camp['members'].append(dict(account_id=aid, company=a['company'], step=0, phase=phase,
                                     step_draft='', step_approved=False,
+                                    recipient_email=a.get('contact_email') or '', recipient_name=a.get('contact') or '',
                                     history=[dict(at=s.now(), event='enrolled', detail='Enrolled at step 1: Initial outreach')]))
         added.append(aid)
     store(s, camp)
@@ -183,18 +184,25 @@ def send_step(s, d):
         state = senders.provider_state().get(provider, {})
         if not state.get('configured'): raise ValueError(provider + ' provider is not configured. Dry-run is still available.')
     if m['phase'] != 'awaiting_send': raise ValueError('This step has no reviewed draft ready to send')
+    a = next((a for a in s.records() if a['id'] == m['account_id']), None)
     if m['step'] == 0:
-        a = next((a for a in s.records() if a['id'] == m['account_id']), None)
         body = (a or {}).get('draft', '')
+        if not (a and a.get('approved')): raise ValueError('The initial draft must be reviewed before sending')
     else:
+        if not m['step_approved']: raise ValueError('The step draft must be reviewed before sending')
         body = m['step_draft']
     if not body: raise ValueError('No draft body for this step')
-    to = s.text(d.get('to'), 200)
-    if not to: raise ValueError('A recipient address is required (the app stores no contact emails; supply it per send)')
-    sender = approval['sender'] if approval else s.text(d.get('sender'), 200)
-    if not sender: raise ValueError('A sender address is required')
-    subject = s.text(d.get('subject'), 200) or (STEPS[m['step']][1] + ': ' + m['company'])
-    result = senders.send(provider, sender, to, subject, body, dry_run=dry)
+    # Recipient binds to the enrolled member's contact evidence, refreshed from the
+    # account record. An arbitrary per-send address is never accepted: if the caller
+    # supplies one it must equal the bound address.
+    to = ((a or {}).get('contact_email') or m.get('recipient_email') or '').lower()
+    if not to: raise ValueError('This account has no contact email evidence. Add a contact email on the account and re-review before sending.')
+    supplied = s.text(d.get('to'), 200).lower()
+    if supplied and supplied != to: raise ValueError('Recipient must be the enrolled contact ' + to + ' - arbitrary recipients are out of scope')
+    if not dry and not approval: raise ValueError('No operational approval on this campaign. Record sender, recipient scope and confirmation first.')
+    sender = approval['sender'] if approval else '(dry-run: approval not recorded)'
+    subject = STEPS[m['step']][1] + ': ' + m['company']
+    result = senders.send(provider, sender, to, subject, body, ws=s.ws(), dry_run=dry)
     m['history'].append(dict(at=s.now(), event='send_' + ('dry_run' if dry else 'attempt'),
                              detail=result.get('note') or ('Delivered via ' + provider)))
     store(s, camp)
@@ -207,8 +215,16 @@ def book_meeting(s, d):
     m = _member(camp, d.get('account_id'))
     dry = d.get('dry_run') is not False
     if not dry and not camp.get('send_approval'): raise ValueError('No operational approval on this campaign.')
-    result = bookers.book(d.get('event_type_id'), s.text(d.get('start'), 40),
-                          s.text(d.get('name'), 200) or m['company'], s.text(d.get('email'), 200), dry_run=dry)
+    a = next((a for a in s.records() if a['id'] == m['account_id']), None)
+    invitee_email = ((a or {}).get('contact_email') or m.get('recipient_email') or '').lower()
+    if not invitee_email: raise ValueError('This account has no contact email evidence to invite')
+    invitee_name = ((a or {}).get('contact') or m.get('recipient_name') or m['company'])[:200]
+    start = s.text(d.get('start'), 40)
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:?\d{2})', start or ''):
+        raise ValueError('Booking needs an explicit ISO start time with offset, e.g. 2026-10-24T10:00:00+05:30')
+    tz = s.text(d.get('timezone'), 60) or 'Asia/Calcutta'
+    if not re.fullmatch(r'[A-Za-z_]+/[A-Za-z_]+', tz): raise ValueError('Booking needs an IANA timezone like Asia/Calcutta')
+    result = bookers.book(d.get('event_type_id'), start, tz, invitee_name, invitee_email, ws=s.ws(), dry_run=dry)
     m['history'].append(dict(at=s.now(), event='booking_' + ('dry_run' if dry else 'attempt'), detail=result.get('note', 'Booking created')))
     store(s, camp)
     return result
