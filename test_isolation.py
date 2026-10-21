@@ -10,6 +10,7 @@ class IsolationTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(); s.DB=self.tmp.name+'/test.db'; s.connect().close()
         s.CTX.ws=None; s.CTX.email=None
         os.environ['SIGNALDESK_PASSWORD']='test-password-123456'
+        security.FAILURES.clear()
     def tearDown(self):
         self.tmp.cleanup(); s.CTX.ws=None; s.CTX.email=None
     def row(self,**kw):
