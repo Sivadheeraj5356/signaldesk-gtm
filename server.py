@@ -202,7 +202,7 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(ws()),book_providers=bookers.provider_state(ws()),connections=connections.public_state(sys.modules[__name__]))
+    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(ws()),book_providers=bookers.provider_state(ws()),connections=connections.public_state(sys.modules[__name__]),gmail_oauth_configured=security.google_configured())
     out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
     if ws()=='owner': out['grants']=grants()
     return out

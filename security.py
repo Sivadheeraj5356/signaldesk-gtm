@@ -63,14 +63,18 @@ def google_start(s):
     with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('oauth-state-'+raw),json.dumps({'oauth':True,'expires':time.time()+600})))
     from urllib.parse import urlencode
     return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/auth/google/callback','response_type':'code','scope':'openid email profile','state':raw,'access_type':'online'})
+def _pkce_challenge(verifier):
+    import hashlib,base64
+    return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
 def gmail_connect_start(s,ws,email):
     """OAuth consent for gmail.send on the SAME Google OAuth client as sign-in.
     State nonce binds this workspace+user; offline access asks for a refresh token."""
     if not google_configured():raise ValueError('Google OAuth client is not configured on this server')
     raw=secrets.token_urlsafe(24)
-    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('gmail-connect-'+raw),json.dumps({'ws':ws,'email':email,'expires':time.time()+600})))
+    verifier=secrets.token_urlsafe(48)
+    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('gmail-connect-'+raw),json.dumps({'ws':ws,'email':email,'pkce':verifier,'expires':time.time()+600})))
     from urllib.parse import urlencode
-    return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/connect/gmail/callback','response_type':'code','scope':'https://www.googleapis.com/auth/gmail.send','state':raw,'access_type':'offline','prompt':'consent'})
+    return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/connect/gmail/callback','response_type':'code','scope':'openid email https://www.googleapis.com/auth/gmail.send','state':raw,'access_type':'offline','prompt':'consent','code_challenge':_pkce_challenge(verifier),'code_challenge_method':'S256'})
 def gmail_connect_finish(s,code,state):
     import connections
     if not code or not state:raise ValueError('Google consent was cancelled or failed. Try again.')
@@ -81,7 +85,7 @@ def gmail_connect_finish(s,code,state):
     st=json.loads(r[0])
     if st['expires']<time.time():raise ValueError('Connection attempt expired. Start again.')
     import urllib.request,urllib.parse
-    body=urllib.parse.urlencode({'code':code,'client_id':os.environ['GOOGLE_CLIENT_ID'],'client_secret':os.environ['GOOGLE_CLIENT_SECRET'],'redirect_uri':origin()+'/api/connect/gmail/callback','grant_type':'authorization_code'}).encode()
+    body=urllib.parse.urlencode({'code':code,'client_id':os.environ['GOOGLE_CLIENT_ID'],'client_secret':os.environ['GOOGLE_CLIENT_SECRET'],'redirect_uri':origin()+'/api/connect/gmail/callback','grant_type':'authorization_code','code_verifier':st['pkce']}).encode()
     try:
         t=json.loads(urllib.request.urlopen(urllib.request.Request('https://oauth2.googleapis.com/token',data=body),timeout=15).read())
     except Exception:raise ValueError('Google token exchange failed. Try again.')
