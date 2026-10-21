@@ -24,7 +24,14 @@ def session(s,h):
     if not raw:return None
     with s.default_connect() as c:r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash(raw),)).fetchone()
     if not r:return None
-    d=json.loads(r[0]);return d if d['expires']>time.time() and hmac.compare_digest(d.get('version',''),token_hash(os.environ.get('SIGNALDESK_PASSWORD',''))) else None
+    d=json.loads(r[0])
+    if not (d['expires']>time.time() and hmac.compare_digest(d.get('version',''),token_hash(os.environ.get('SIGNALDESK_PASSWORD','')))):return None
+    if 'ws' not in d:
+        if 'email' in d:
+            if d.get('email') in owner_emails(): d['ws']='owner'
+            else: return None
+        else: d['ws']='owner'
+    return d
 def login(s,password,key,email=''):
     # Global cap is intentional behind a reverse proxy. Do not trust forwarded client IPs.
     with LOCK:

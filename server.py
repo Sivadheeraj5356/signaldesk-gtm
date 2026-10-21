@@ -19,10 +19,17 @@ DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
     import storage
-    return storage.connect(DB, ws())
+    try: return storage.connect(DB, ws())
+    except Exception:
+        if ws()!='owner': raise ValueError('This workspace storage is unavailable. The workspace owner can run the storage probe in Workflow settings.')
+        raise
 def default_connect():
     import storage
     return storage.connect(DB, None)
+def check_grant(auth):
+    w=(auth or {}).get('ws')
+    if not w or w=='owner': return True
+    return access_granted((auth or {}).get('email'))
 def access_granted(email):
     email=str(email or '').strip().lower()
     if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email): return False
@@ -167,6 +174,10 @@ def state():
     return out
 
 def action(path,d):
+    if path=='/api/storage/probe':
+        if ws()!='owner': raise ValueError('Only the workspace owner can run the storage probe')
+        import storage
+        return storage.probe(DB)
     if path=='/api/access':
         if ws()!='owner': raise ValueError('Only the workspace owner can manage access')
         email=str(d.get('email','')).strip().lower()
@@ -272,6 +283,9 @@ class Handler(BaseHTTPRequestHandler):
                     page=(ROOT/'login.html').read_text().replace('__GOOGLE_ENABLED__','true' if security.google_configured() else 'false')
                     return self.send(200,page,'text/html')
                 return self.send(401,{'error':'Sign in required'})
+            if not check_grant(auth):
+                security.logout(sys.modules[__name__],self.headers.get('Cookie'))
+                return self.send(401,{'error':'Workspace access was revoked'})
             CTX.ws=auth.get('ws');CTX.email=auth.get('email')
         if self.path=='/api/state': return self.send(200,state())
         if self.path=='/api/backup':
@@ -295,6 +309,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
                 auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
                 if not auth:return self.send(401,{'error':'Sign in required'})
+                if not check_grant(auth):
+                    security.logout(sys.modules[__name__],self.headers.get('Cookie'))
+                    return self.send(401,{'error':'Workspace access was revoked'})
                 CTX.ws=auth.get('ws');CTX.email=auth.get('email')
                 if not __import__('hmac').compare_digest(self.headers.get('X-CSRF-Token',''),auth['csrf']):return self.send(403,{'error':'Refresh your session and retry'})
                 if self.path=='/api/logout':

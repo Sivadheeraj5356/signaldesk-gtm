@@ -39,3 +39,36 @@ def connect(path,ws=None):
     c=sqlite3.connect(path,timeout=15);c.row_factory=sqlite3.Row
     for t,cols in [('jobs','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('campaigns','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('accounts','id TEXT PRIMARY KEY, data TEXT NOT NULL'),('config','id INTEGER PRIMARY KEY, data TEXT NOT NULL'),('runs','id TEXT PRIMARY KEY, at TEXT, data TEXT NOT NULL')]:c.execute('CREATE TABLE IF NOT EXISTS '+t+'('+cols+')')
     c.commit();return c
+def probe(path):
+    token=os.urandom(6).hex()
+    url=os.environ.get('DATABASE_URL')
+    if url:
+        schema='sd_probe_'+token
+        c=None
+        try:
+            c=Postgres(url,'probe_'+token)
+            c.execute('CREATE TABLE IF NOT EXISTS probe(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+            c.execute('INSERT INTO probe VALUES(?,?)',('ok','ok'))
+            r=c.execute('SELECT data FROM probe WHERE id=?',('ok',)).fetchone()
+            if not r or r[0]!='ok': return {'ok':False,'detail':'Probe write did not read back. External workspaces are unavailable; the owner workspace is unaffected.'}
+            c.execute('DROP SCHEMA IF EXISTS '+schema+' CASCADE')
+            return {'ok':True,'detail':'External workspace storage verified: isolated schema create, write, read and cleanup all succeeded. No existing data was touched.'}
+        except Exception as e:
+            try:
+                if c: c.execute('DROP SCHEMA IF EXISTS '+schema+' CASCADE')
+            except Exception: pass
+            return {'ok':False,'detail':'External workspace storage is unavailable: '+str(e)[:180]+' No privileges or existing data were changed.'}
+        finally:
+            try:
+                if c: c.close()
+            except Exception: pass
+    p=re.sub(r'(\.sqlite3)?$','',str(path))+'-probe_'+token+'.sqlite3'
+    try:
+        c=sqlite3.connect(p); c.execute('CREATE TABLE probe(id TEXT PRIMARY KEY, data TEXT NOT NULL)'); c.execute('INSERT INTO probe VALUES(?,?)',('ok','ok')); c.commit()
+        r=c.execute('SELECT data FROM probe WHERE id=?',('ok',)).fetchone(); c.close(); os.remove(p)
+        if not r or r[0]!='ok': return {'ok':False,'detail':'Probe write did not read back.'}
+        return {'ok':True,'detail':'External workspace storage verified: isolated database file created, written, read and removed.'}
+    except Exception as e:
+        try: os.remove(p)
+        except Exception: pass
+        return {'ok':False,'detail':'External workspace storage is unavailable: '+str(e)[:180]}

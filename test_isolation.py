@@ -106,4 +106,33 @@ class IsolationTests(unittest.TestCase):
         s.CTX.ws=got.get('ws')
         self.assertEqual(s.ws(),'owner')
 
+    def test_malformed_external_session_fails_closed(self):
+        security.init(s)
+        import secrets as sc
+        os.environ['SIGNALDESK_OWNER_EMAILS']='owner@example.com'
+        raw=sc.token_urlsafe(40)
+        with s.default_connect() as c:
+            c.execute('INSERT INTO sessions VALUES(?,?)',(security.token_hash(raw),json.dumps({'csrf':'x','expires':time.time()+1000,'version':security.token_hash(os.environ['SIGNALDESK_PASSWORD']),'email':EXT})))
+        self.assertIsNone(security.session(s,'signaldesk_session='+raw))  # external email, no ws -> rejected
+        raw2=sc.token_urlsafe(40)
+        with s.default_connect() as c:
+            c.execute('INSERT INTO sessions VALUES(?,?)',(security.token_hash(raw2),json.dumps({'csrf':'x','expires':time.time()+1000,'version':security.token_hash(os.environ['SIGNALDESK_PASSWORD']),'email':'owner@example.com'})))
+        got=security.session(s,'signaldesk_session='+raw2)
+        self.assertEqual(got['ws'],'owner')  # legacy owner session upgrades safely
+
+    def test_check_grant_blocks_revoked_external_sessions(self):
+        self.assertTrue(s.check_grant({'ws':'owner','email':'owner@example.com'}))
+        self.assertTrue(s.check_grant({'email':'owner@example.com'}))  # legacy owner
+        self.assertFalse(s.check_grant({'ws':EXT_WS,'email':EXT}))  # never granted
+        s.action('/api/access',{'email':EXT})
+        self.assertTrue(s.check_grant({'ws':EXT_WS,'email':EXT}))
+        s.action('/api/access',{'email':EXT,'remove':True})
+        self.assertFalse(s.check_grant({'ws':EXT_WS,'email':EXT}))  # revoke takes effect immediately
+
+    def test_storage_probe_sqlite(self):
+        import storage
+        r=storage.probe(s.DB)
+        self.assertTrue(r['ok'], r['detail'])
+        self.assertFalse(any('probe' in f for f in os.listdir(self.tmp.name)))  # cleaned up
+
 if __name__=='__main__': unittest.main()
