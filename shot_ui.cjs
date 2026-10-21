@@ -1,0 +1,26 @@
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch();
+  const p = await (await b.newContext({viewport:{width:1440,height:1000}})).newPage();
+  await p.goto('http://127.0.0.1:8787/sign-in',{waitUntil:'load',timeout:20000});
+  await p.fill('#email','owner@test.example');
+  await p.fill('#password','testpass12345678');
+  await p.click('form button');
+  await p.waitForTimeout(5000);
+  console.log('after login url:', p.url());
+  await p.click('[data-tab="workflow"]');
+  await p.waitForTimeout(1500);
+  await p.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+  await p.waitForTimeout(800);
+  await p.screenshot({path:'/tmp/iso-workflow-access.png'});
+  await p.fill('#grantemail','teammate@demo.example');
+  await p.click('#grantform button[type=submit]');
+  await p.waitForTimeout(3500);
+  await p.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+  await p.waitForTimeout(500);
+  await p.screenshot({path:'/tmp/iso-workflow-granted.png'});
+  await p.click('[data-tab="overview"]');
+  await p.waitForTimeout(1500);
+  await p.screenshot({path:'/tmp/iso-overview.png'});
+  await b.close();
+})();

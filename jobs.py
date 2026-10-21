@@ -30,10 +30,11 @@ def start(s,d):
         if not isinstance(ids,list) or not ids or len(ids)>25:raise ValueError('Choose 1-25 accounts per batch')
         if len(set(ids))!=len(ids) or any(i not in available for i in ids):raise ValueError('Invalid or duplicate account IDs')
         if d.get('research') not in [True,False,None]:raise ValueError('Research must be a boolean')
-        j=dict(id=str(uuid.uuid4()),status='queued',created=s.now(),updated=s.now(),ids=ids,research=bool(d.get('research')),config=s.config(),total=len(ids),completed=0,trace=[],message='Preparing account batch. Nothing will be sent.')
+        j=dict(id=str(uuid.uuid4()),status='queued',created=s.now(),updated=s.now(),ids=ids,research=bool(d.get('research')),config=s.config(),total=len(ids),completed=0,trace=[],message='Preparing account batch. Nothing will be sent.',ws=s.ws())
         CANCEL.clear();store(s,j);WORKER=threading.Thread(target=process,args=(s,j),daemon=True);WORKER.start();return j
 
 def process(s,j):
+    s.CTX.ws=j.get('ws')
     j['status']='running';store(s,j)
     try:
         for aid in j['ids']:

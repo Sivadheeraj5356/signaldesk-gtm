@@ -8,6 +8,8 @@ import sys
 PIPELINE_LOCK=threading.RLock()
 MODEL=None
 RESEARCH_LAST={}
+CTX=threading.local()
+def ws(): return getattr(CTX,'ws',None) or 'owner'
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,7 +19,20 @@ DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def connect():
     import storage
-    return storage.connect(DB)
+    return storage.connect(DB, ws())
+def default_connect():
+    import storage
+    return storage.connect(DB, None)
+def access_granted(email):
+    email=str(email or '').strip().lower()
+    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email): return False
+    with default_connect() as c:
+        c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        return c.execute('SELECT data FROM grants WHERE id=?',(email,)).fetchone() is not None
+def grants():
+    with default_connect() as c:
+        c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        return [json.loads(r[0]) for r in c.execute('SELECT data FROM grants ORDER BY rowid')]
 def config():
     with connect() as c: r=c.execute('SELECT data FROM config WHERE id=1').fetchone()
     return json.loads(r[0]) if r else DEFAULT.copy()
@@ -146,9 +161,31 @@ def campaign_save(d):
 
 def state():
     with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    return dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
+    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1')
+    out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
+    if ws()=='owner': out['grants']=grants()
+    return out
 
 def action(path,d):
+    if path=='/api/access':
+        if ws()!='owner': raise ValueError('Only the workspace owner can manage access')
+        email=str(d.get('email','')).strip().lower()
+        with default_connect() as c:
+            c.execute('CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+            if 'remove' in d:
+                c.execute('DELETE FROM grants WHERE id=?',(email,))
+                try:
+                    for row in c.execute('SELECT id,data FROM sessions').fetchall():
+                        try: sd=json.loads(row[1])
+                        except Exception: continue
+                        if sd.get('email')==email: c.execute('DELETE FROM sessions WHERE id=?',(row[0],))
+                except Exception: pass
+                return {'removed':email}
+            if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email): raise ValueError('Enter a valid email address')
+            if email in security.owner_emails(): raise ValueError('Owner emails already have full access')
+            g=dict(email=email,added=now(),note=text(d.get('note'),200))
+            c.execute('INSERT OR REPLACE INTO grants VALUES(?,?)',(email,json.dumps(g)))
+            return g
     if path=='/api/restore':return backup.restore(sys.modules[__name__],d.get('backup'),d.get('confirmed'))
     if path=='/api/campaign': return campaign_save(d)
     if path=='/api/research':
@@ -235,6 +272,7 @@ class Handler(BaseHTTPRequestHandler):
                     page=(ROOT/'login.html').read_text().replace('__GOOGLE_ENABLED__','true' if security.google_configured() else 'false')
                     return self.send(200,page,'text/html')
                 return self.send(401,{'error':'Sign in required'})
+            CTX.ws=auth.get('ws');CTX.email=auth.get('email')
         if self.path=='/api/state': return self.send(200,state())
         if self.path=='/api/backup':
             data=state();data.update(format='signaldesk-backup-v1',created=now());return self.send(200,data)
@@ -253,10 +291,11 @@ class Handler(BaseHTTPRequestHandler):
                 if self.headers.get('Origin')!=security.origin():return self.send(403,{'error':'Same-origin request required'})
                 if self.path=='/api/login':
                     if not security.email_allowed(d.get('email','')):return self.send(403,{'error':'This email is not authorized for this workspace'})
-                    raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner')
+                    raw,auth=security.login(sys.modules[__name__],d.get('password',''),'owner',email=d.get('email',''))
                     return self.send(200,{'ok':True},cookie=security.COOKIE.format(raw))
                 auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
                 if not auth:return self.send(401,{'error':'Sign in required'})
+                CTX.ws=auth.get('ws');CTX.email=auth.get('email')
                 if not __import__('hmac').compare_digest(self.headers.get('X-CSRF-Token',''),auth['csrf']):return self.send(403,{'error':'Refresh your session and retry'})
                 if self.path=='/api/logout':
                     security.logout(sys.modules[__name__],self.headers.get('Cookie'));return self.send(200,{'ok':True},cookie=security.COOKIE.format('')+'; Max-Age=0')

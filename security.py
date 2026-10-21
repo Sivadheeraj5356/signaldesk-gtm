@@ -14,7 +14,7 @@ def validate():
 def origin():return (os.environ.get('SIGNALDESK_ORIGIN') or os.environ.get('RENDER_EXTERNAL_URL','')).rstrip('/')
 def token_hash(v):return hashlib.sha256(v.encode()).hexdigest()
 def init(s):
-    with s.connect() as c:c.execute('CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT NOT NULL)')
+    with s.default_connect() as c:c.execute('CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT NOT NULL)')
 def cookie(h):
     try:
         c=SimpleCookie(h or '');return c['signaldesk_session'].value if 'signaldesk_session' in c else ''
@@ -22,10 +22,10 @@ def cookie(h):
 def session(s,h):
     raw=cookie(h)
     if not raw:return None
-    with s.connect() as c:r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash(raw),)).fetchone()
+    with s.default_connect() as c:r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash(raw),)).fetchone()
     if not r:return None
     d=json.loads(r[0]);return d if d['expires']>time.time() and hmac.compare_digest(d.get('version',''),token_hash(os.environ.get('SIGNALDESK_PASSWORD',''))) else None
-def login(s,password,key):
+def login(s,password,key,email=''):
     # Global cap is intentional behind a reverse proxy. Do not trust forwarded client IPs.
     with LOCK:
         attempts=FAILURES.get(key,[]);attempts=[x for x in attempts if time.time()-x<900]
@@ -33,27 +33,27 @@ def login(s,password,key):
         if not hmac.compare_digest(str(password).encode(),os.environ.get('SIGNALDESK_PASSWORD','').encode()):
             FAILURES[key]=attempts+[time.time()];raise ValueError('Incorrect password')
         FAILURES.pop(key,None)
-    raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD',''))}
-    with s.connect() as c:
+    raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD','')),'email':str(email).strip().lower(),'ws':'owner'}
+    with s.default_connect() as c:
         for row in c.execute('SELECT id,data FROM sessions').fetchall():
             if json.loads(row[1])['expires']<time.time():c.execute('DELETE FROM sessions WHERE id=?',(row[0],))
         c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
     return raw,d
 COOKIE='signaldesk_session={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200'
 def logout(s,h):
-    with s.connect() as c:c.execute('DELETE FROM sessions WHERE id=?',(token_hash(cookie(h)),))
+    with s.default_connect() as c:c.execute('DELETE FROM sessions WHERE id=?',(token_hash(cookie(h)),))
 
 def google_configured():return bool(os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET'))
 def owner_emails():return [e.strip().lower() for e in os.environ.get('SIGNALDESK_OWNER_EMAILS','').split(',') if e.strip()]
 def email_allowed(v):return not owner_emails() or str(v).strip().lower() in owner_emails()
 def google_start(s):
     raw=secrets.token_urlsafe(24)
-    with s.connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('oauth-state-'+raw),json.dumps({'oauth':True,'expires':time.time()+600})))
+    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash('oauth-state-'+raw),json.dumps({'oauth':True,'expires':time.time()+600})))
     from urllib.parse import urlencode
     return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({'client_id':os.environ['GOOGLE_CLIENT_ID'],'redirect_uri':origin()+'/api/auth/google/callback','response_type':'code','scope':'openid email profile','state':raw,'access_type':'online'})
 def google_finish(s,code,state):
     if not code or not state:raise ValueError('Google sign-in was cancelled or failed. Try again.')
-    with s.connect() as c:
+    with s.default_connect() as c:
         r=c.execute('SELECT data FROM sessions WHERE id=?',(token_hash('oauth-state-'+state),)).fetchone()
         c.execute('DELETE FROM sessions WHERE id=?',(token_hash('oauth-state-'+state),))
     if not r or json.loads(r[0])['expires']<time.time():raise ValueError('Sign-in link expired. Start again.')
@@ -65,7 +65,10 @@ def google_finish(s,code,state):
         u=json.loads(urllib.request.urlopen(req,timeout=15).read())
     except Exception:raise ValueError('Google sign-in failed. Try again.')
     email=str(u.get('email','')).lower()
-    if not email or not u.get('email_verified') or not email_allowed(email):raise ValueError('This Google account is not authorized for this workspace.')
-    raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD',''))}
-    with s.connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
+    if not email or not u.get('email_verified'):raise ValueError('This Google account is not authorized for this workspace.')
+    if email in owner_emails(): ws='owner'
+    elif s.access_granted(email): ws='u_'+hashlib.sha256(email.encode()).hexdigest()[:16]
+    else: raise ValueError('This Google account is not authorized for this workspace. Access is granted by the workspace owner.')
+    raw=secrets.token_urlsafe(40);d={'csrf':secrets.token_urlsafe(32),'expires':time.time()+43200,'version':token_hash(os.environ.get('SIGNALDESK_PASSWORD','')),'email':email,'ws':ws}
+    with s.default_connect() as c:c.execute('INSERT INTO sessions VALUES(?,?)',(token_hash(raw),json.dumps(d)))
     return raw,d
