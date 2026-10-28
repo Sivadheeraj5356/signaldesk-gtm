@@ -410,6 +410,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/api/backup':
             data=state();data.update(format='signaldesk-backup-v1',created=now());return self.send(200,data)
         if self.path=='/api/export': return self.send(200,export(),'text/csv')
+        if self.path=='/sign-in':
+            self.send_response(302);self.send_header('Location','/');self.send_header('Content-Length','0');self.end_headers();return
+        if self.path.split('?')[0]=='/app': return self.send(200,(ROOT/'index.html').read_text(),'text/html')
         if self.path in ['/','/index.html']: return self.send(200,(ROOT/'index.html').read_text(),'text/html')
         return self.send(404,{'error':'Not found'})
     def do_POST(self):
