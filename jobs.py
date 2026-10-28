@@ -86,4 +86,7 @@ def process(s,j):
         j['status']='cancelled' if CANCEL.is_set() else 'complete'
         j['message']='Stopped. Completed work preserved; nothing sent.' if CANCEL.is_set() else 'Batch finished. Inspect per-account results and review drafts. Nothing sent.'
     except Exception as e:j.update(status='failed',message='Batch stopped: '+str(e)[:200])
-    finally:store(s,j)
+    finally:
+        store(s,j)
+        try:s.close_cached_pg()
+        except Exception:pass

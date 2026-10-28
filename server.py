@@ -17,18 +17,45 @@ ROOT = Path(__file__).parent
 DB = os.environ.get('SIGNALDESK_DB', str(ROOT / 'signaldesk.sqlite3'))
 DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=55, offer='Turn account research into a repeatable GTM workflow', cta='Would a short walkthrough be useful?', ai=False, ai_provider='local', ai_terms=False, channel='email', company_name='', company_website='', company_details='', linkedin='')
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
+class _SharedPG:
+    # Per-request Postgres reuse: commit/rollback per with-block as before,
+    # but the underlying connection closes when the request finishes, not
+    # after every query group. Each query group previously paid a full TCP +
+    # TLS + auth round trip (multi-second to a distant database region),
+    # which made aggregate endpoints such as /api/state take 15-30 s.
+    def __init__(self,real):self.real=real
+    def execute(self,*a,**k):return self.real.execute(*a,**k)
+    def __enter__(self):return self.real
+    def __exit__(self,typ,val,tb):
+        try:self.real.c.rollback() if typ else self.real.c.commit()
+        except Exception:pass
+        return False
+def _cached_pg(key,opener):
+    cache=getattr(CTX,'pg',None)
+    if cache is None: cache={};CTX.pg=cache
+    real=cache.get(key)
+    if real is None:
+        real=opener()
+        if hasattr(real,'c'): cache[key]=real  # Postgres only; sqlite keeps per-call connections
+        else: return real
+    return _SharedPG(real) if hasattr(real,'c') else real
+def close_cached_pg():
+    cache=getattr(CTX,'pg',None);CTX.pg={}
+    for real in (cache or {}).values():
+        try:real.close()
+        except Exception:pass
 def connect():
     import storage
-    try: return storage.connect(DB, ws())
+    try: return _cached_pg(ws(),lambda: storage.connect(DB,ws()))
     except Exception:
         if ws()!='owner': raise ValueError('This workspace storage is unavailable. The workspace owner can run the storage probe in Workflow settings.')
         raise
 def default_connect():
     import storage
-    return storage.connect(DB, None)
+    return _cached_pg('',lambda: storage.connect(DB,None))
 def connect_workspace(w):
     import storage
-    return storage.connect(DB, w)
+    return _cached_pg(str(w),lambda: storage.connect(DB,w))
 def check_grant(auth):
     w=(auth or {}).get('ws')
     if not w or w=='owner': return True
@@ -470,6 +497,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,result)
         except (ValueError,KeyError,TypeError) as e: return self.send(400,{'error':str(e)})
         except Exception: return self.send(500,{'error':'Internal error; check local data and retry'})
+_do_GET_impl = Handler.do_GET
+_do_POST_impl = Handler.do_POST
+def _guarded(self,impl):
+    try: return impl(self)
+    finally: close_cached_pg()
+def _wsgi_do_GET(self): return _guarded(self,_do_GET_impl)
+def _wsgi_do_POST(self): return _guarded(self,_do_POST_impl)
+Handler.do_GET = _wsgi_do_GET
+Handler.do_POST = _wsgi_do_POST
+
 def main():
     security.validate()
     port=int(os.environ.get('PORT','8787')); connect().close()
@@ -544,8 +581,10 @@ def app(environ, start_response):
     try:
         Handler(sock, ('127.0.0.1', 0), _WsgiServer())
     except Exception:
+        close_cached_pg()
         start_response('500 Internal Server Error', [('Content-Type', 'application/json; charset=utf-8')])
         return [b'{"error":"Internal error; check local data and retry"}']
+    close_cached_pg()
     out = sock.out.getvalue()
     head, _, resp_body = out.partition(b'\r\n\r\n')
     parts = head.split(b'\r\n')
