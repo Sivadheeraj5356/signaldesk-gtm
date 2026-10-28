@@ -3,12 +3,31 @@ import json,uuid,threading,time
 LOCK=threading.RLock()
 WORKER=None
 CANCEL=threading.Event()
+STALE_AFTER_SECONDS = 600
+
 def list_jobs(s):
     with s.connect() as c:return [json.loads(r[0]) for r in c.execute('SELECT data FROM jobs ORDER BY rowid DESC LIMIT 30')]
+
+def expire_stale(s):
+    # Serverless hosts pause instances between requests, so a batch whose
+    # worker thread stopped updating must not block the workspace forever.
+    # Render runs recover() on restart instead; this is the serverless-safe
+    # equivalent, driven by the job's own last DB heartbeat.
+    import datetime
+    for j in list_jobs(s):
+        if j['status'] not in ['queued','running','cancelling']:continue
+        try: updated = datetime.datetime.fromisoformat(j['updated'])
+        except Exception: continue
+        age = (datetime.datetime.now(datetime.timezone.utc) - updated).total_seconds()
+        if age > STALE_AFTER_SECONDS:
+            j.update(status='interrupted',message='The host paused the worker before it finished. Completed accounts are preserved. Retry creates a new job; no external delivery occurred.')
+            store(s,j)
 def store(s,j):
     j['updated']=s.now()
     with s.connect() as c:c.execute('INSERT OR REPLACE INTO jobs VALUES(?,?)',(j['id'],json.dumps(j)))
-def active(s):return any(j['status'] in ['queued','running','cancelling'] for j in list_jobs(s))
+def active(s):
+    expire_stale(s)
+    return any(j['status'] in ['queued','running','cancelling'] for j in list_jobs(s))
 def recover(s):
     for j in list_jobs(s):
         if j['status'] in ['queued','running','cancelling']:

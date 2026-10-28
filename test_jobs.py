@@ -17,6 +17,15 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(j['status'],'complete');self.assertEqual(j['completed'],2);self.assertTrue(all(a['draft'] for a in s.records()));self.assertTrue(all(not a['approved'] for a in s.records()))
     def test_config_snapshot(self):
         ids=self.add();j=jobs.start(s,{'ids':ids});self.wait();self.assertEqual(j['config']['industry'],'SaaS')
+
+    def test_stale_batch_expires(self):
+        import json as _json, datetime as _dt
+        stale=(_dt.datetime.now(_dt.timezone.utc)-_dt.timedelta(minutes=11)).isoformat()
+        with s.connect() as c:
+            c.execute('INSERT INTO jobs VALUES(?,?)',('stale1',_json.dumps(dict(id='stale1',status='running',updated=stale,ws='owner'))))
+        self.assertTrue(jobs.active(s) is False)
+        row=next(j for j in jobs.list_jobs(s) if j['id']=='stale1')
+        self.assertEqual(row['status'],'interrupted')
     def test_limits(self):
         self.add()
         for ids in [[],['unknown'],['x']*26]:
