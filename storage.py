@@ -7,7 +7,11 @@ class Postgres:
     def __init__(self,url,ws=None):
         import psycopg
         schema='signaldesk' if not ws or ws=='owner' else 'sd_'+re.sub('[^a-z0-9_]','_',str(ws))[:40]
-        self.c=psycopg.connect(url,connect_timeout=10,options='-c statement_timeout=15000 -c lock_timeout=5000',sslmode=os.environ.get('PGSSLMODE','verify-full'),sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
+        self.schema=schema
+        # Autocommit: single-statement writes commit without a client COMMIT round
+        # trip, and read-only blocks cost nothing. Multi-write blocks keep their
+        # atomicity with an explicit BEGIN (psycopg manual transaction mode).
+        self.c=psycopg.connect(url,autocommit=True,connect_timeout=10,options='-c statement_timeout=15000 -c lock_timeout=5000',sslmode=os.environ.get('PGSSLMODE','verify-full'),sslrootcert=os.environ.get('PGSSLROOTCERT',os.path.join(os.path.dirname(__file__),'supabase-ca.crt')))
         self.c.execute('SET search_path TO '+schema)
         with LOCK:
             if (url,schema) not in READY:
@@ -72,3 +76,45 @@ def probe(path):
         try: os.remove(p)
         except Exception: pass
         return {'ok':False,'detail':'External workspace storage is unavailable: '+str(e)[:180]}
+
+# Cross-request connection pool. Serverless instances freeze between requests;
+# a pooled connection can be silently dead after a thaw, so a connection idle
+# longer than POOL_PING_AFTER_SECONDS is pinged before reuse. Only Postgres is
+# pooled: sqlite connections stay per-call.
+POOL={}
+POOL_LOCK=threading.Lock()
+POOL_MAX=4
+POOL_PING_AFTER_SECONDS=30
+def checkout(path,ws=None):
+    url=os.environ.get('DATABASE_URL')
+    if not url:return connect(path,ws)
+    import time as _t
+    schema='signaldesk' if not ws or ws=='owner' else 'sd_'+re.sub('[^a-z0-9_]','_',str(ws))[:40]
+    key=(url,schema)
+    while True:
+        with POOL_LOCK:
+            entries=POOL.get(key) or []
+            pg=entries.pop() if entries else None
+            POOL[key]=entries
+        if pg is None:break
+        try:
+            if _t.monotonic()-pg.idle_since>POOL_PING_AFTER_SECONDS:pg.c.execute('SELECT 1')
+            pg.idle_since=_t.monotonic();return pg
+        except Exception:
+            try:pg.close()
+            except Exception:pass
+    pg=Postgres(url,ws);pg.idle_since=_t.monotonic();return pg
+def checkin(pg):
+    import time as _t
+    if not isinstance(pg,Postgres):
+        try:pg.close()
+        except Exception:pass
+        return
+    pg.idle_since=_t.monotonic()
+    with POOL_LOCK:
+        entries=POOL.setdefault((os.environ.get('DATABASE_URL'),pg.schema),[])
+        keep=len(entries)<POOL_MAX
+        if keep:entries.append(pg)
+    if not keep:
+        try:pg.close()
+        except Exception:pass

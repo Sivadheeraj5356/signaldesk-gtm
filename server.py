@@ -18,11 +18,12 @@ DB = os.environ.get('SIGNALDESK_DB', str(ROOT / 'signaldesk.sqlite3'))
 DEFAULT = dict(industry='SaaS', region='', min_size=10, max_size=500, threshold=55, offer='Turn account research into a repeatable GTM workflow', cta='Would a short walkthrough be useful?', ai=False, ai_provider='local', ai_terms=False, channel='email', company_name='', company_website='', company_details='', linkedin='')
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 class _SharedPG:
-    # Per-request Postgres reuse: commit/rollback per with-block as before,
-    # but the underlying connection closes when the request finishes, not
-    # after every query group. Each query group previously paid a full TCP +
-    # TLS + auth round trip (multi-second to a distant database region),
-    # which made aggregate endpoints such as /api/state take 15-30 s.
+    # Per-request Postgres reuse over a pooled connection. Postgres runs in
+    # autocommit mode, so the commit/rollback here only settles explicit
+    # BEGIN blocks; plain statements commit per statement without a client
+    # COMMIT round trip. The underlying connection returns to the pool when
+    # the request finishes instead of closing and re-paying TCP + TLS + auth
+    # on the next request.
     def __init__(self,real):self.real=real
     def execute(self,*a,**k):return self.real.execute(*a,**k)
     def __enter__(self):return self.real
@@ -40,22 +41,25 @@ def _cached_pg(key,opener):
         else: return real
     return _SharedPG(real) if hasattr(real,'c') else real
 def close_cached_pg():
+    import storage
     cache=getattr(CTX,'pg',None);CTX.pg={}
     for real in (cache or {}).values():
-        try:real.close()
+        try:storage.checkin(real)
         except Exception:pass
 def connect():
     import storage
-    try: return _cached_pg(ws(),lambda: storage.connect(DB,ws()))
+    # The owner workspace shares the default schema, so share one connection.
+    w=ws()
+    try: return _cached_pg('' if w=='owner' else w,lambda: storage.checkout(DB,None if w=='owner' else w))
     except Exception:
         if ws()!='owner': raise ValueError('This workspace storage is unavailable. The workspace owner can run the storage probe in Workflow settings.')
         raise
 def default_connect():
     import storage
-    return _cached_pg('',lambda: storage.connect(DB,None))
+    return _cached_pg('',lambda: storage.checkout(DB,None))
 def connect_workspace(w):
     import storage
-    return _cached_pg(str(w),lambda: storage.connect(DB,w))
+    return _cached_pg('' if str(w)=='owner' else str(w),lambda: storage.checkout(DB,None if str(w)=='owner' else w))
 def check_grant(auth):
     w=(auth or {}).get('ws')
     if not w or w=='owner': return True
@@ -113,6 +117,7 @@ def import_rows(rows):
         if a['domain'] in current: duplicates+=1; continue
         current.add(a['domain']); pending.append(a)
     with connect() as c:
+        c.execute('BEGIN')  # one transaction: autocommit would commit row by row
         for a in pending: c.execute('INSERT INTO accounts VALUES(?,?)',(a['id'],json.dumps(a)))
     return dict(imported=len(pending),duplicates=duplicates)
 def evaluate(a,cfg):
@@ -228,8 +233,29 @@ def campaign_save(d):
     return c
 
 def state():
-    with connect() as c: runs=[json.loads(r[0]) for r in c.execute('SELECT data FROM runs ORDER BY at DESC LIMIT 20')]
-    out=dict(accounts=records(),config=config(),runs=runs,campaigns=campaigns(),outreach=outreach.list_campaigns(sys.modules[__name__]),jobs=jobs.list_jobs(sys.modules[__name__]),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(ws()),book_providers=bookers.provider_state(ws()),connections=connections.public_state(sys.modules[__name__]),gmail_oauth_configured=security.google_configured())
+    # One round trip for the workspace tables: every SELECT used to pay its own
+    # network round trip (plus a COMMIT) to a possibly distant database region.
+    # Branch subqueries keep each table's own ORDER BY/LIMIT; ordering within a
+    # tag is restored below because UNION ALL does not preserve it.
+    union=("SELECT tag, s, data FROM ("
+           "SELECT 'accounts' AS tag, rowid AS s, data FROM accounts"
+           " UNION ALL SELECT 'config', id, data FROM config WHERE id=1"
+           " UNION ALL SELECT 'runs', rowid, data FROM (SELECT rowid, data FROM runs ORDER BY at DESC LIMIT 20) r"
+           " UNION ALL SELECT 'campaigns', rowid, data FROM campaigns"
+           " UNION ALL SELECT 'outreach', rowid, data FROM outreach"
+           " UNION ALL SELECT 'jobs', rowid, data FROM (SELECT rowid, data FROM jobs ORDER BY rowid DESC LIMIT 30) j"
+           " UNION ALL SELECT 'connections', rowid, data FROM connections"
+           ") u")
+    with connect() as c: rows=c.execute(union).fetchall()
+    grouped={}
+    for tag,sortkey,data in rows: grouped.setdefault(tag,[]).append((sortkey,json.loads(data)))
+    def items(tag,desc=False):
+        e=grouped.get(tag,[]);e.sort(key=lambda x:x[0],reverse=desc);return [d for _,d in e]
+    cfg_rows=grouped.get('config',[])
+    cfg=cfg_rows[0][1] if cfg_rows else DEFAULT.copy()
+    runs=items('runs');runs.sort(key=lambda r:r.get('at',''),reverse=True)
+    conns=[dict(provider=c2['provider'],identity=c2.get('identity'),status=c2.get('status'),connected_at=c2.get('connected_at')) for c2 in items('connections',True)]
+    out=dict(accounts=items('accounts'),config=cfg,runs=runs,campaigns=items('campaigns',True),outreach=items('outreach',True),jobs=items('jobs',True),ai_enabled=bool(os.environ.get('SIGNALDESK_GGUF')) or os.environ.get('SIGNALDESK_ENABLE_OLLAMA')=='1',gemini_enabled=bool(os.environ.get('SIGNALDESK_GEMINI_API_KEY')),send_providers=senders.provider_state(ws()),book_providers=bookers.provider_state(ws()),connections=conns,gmail_oauth_configured=security.google_configured())
     out['workspace']=ws(); out['email']=getattr(CTX,'email',None)
     if ws()=='owner': out['grants']=grants()
     return out
@@ -358,6 +384,7 @@ def action(path,d):
             if not cfg['ai_terms']: raise ValueError('Confirm the Gemini terms acknowledgment before enabling cloud drafts: on the free tier, Google uses submitted content to improve its products and human reviewers may read it (https://ai.google.dev/gemini-api/terms). This request sends only the offer text; it does not include research, contacts or lead data.')
         if cfg.get('channel') not in ['email','linkedin','partner']: raise ValueError('Unknown distribution channel')
         with connect() as c:
+            c.execute('BEGIN')  # config write and approval reset stay atomic
             c.execute('INSERT OR REPLACE INTO config VALUES(1,?)',(json.dumps(cfg),))
             for a in records(): a.update(approved=False); c.execute('UPDATE accounts SET data=? WHERE id=?',(json.dumps(a),a['id']))
         return cfg
