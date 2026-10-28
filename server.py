@@ -479,3 +479,82 @@ def main():
     print('SignalDesk listening on '+host+':'+str(port),flush=True)
     ThreadingHTTPServer((host,port),Handler).serve_forever()
 if __name__=='__main__':main()
+
+
+# --- Vercel (WSGI) adapter ---------------------------------------------------
+# The same Handler serves the app as a Vercel Function: Vercel detects
+# server.py as a Python entrypoint and loads the top-level WSGI callable
+# `app`. No behavior changes for the Render/local HTTPServer path above.
+class _WsgiSock:
+    def __init__(self, request_bytes):
+        self._in = io.BytesIO(request_bytes)
+        self.out = io.BytesIO()
+    def makefile(self, mode, *args, **kwargs):
+        return self._in if 'r' in mode else self.out
+    def settimeout(self, *_args):
+        pass
+    def sendall(self, data):
+        # StreamRequestHandler writes through socketserver._SocketWriter
+        # (wbufsize=0), which calls sendall rather than makefile('wb').
+        self.out.write(data)
+    def close(self):
+        pass
+
+class _WsgiServer:
+    server_port = 443
+
+_SERVERLESS_READY = False
+
+def _serverless_init():
+    # Once per function instance. Sessions live in the same Postgres as the
+    # Render deployment, so sign-ins carry across hosts and cold starts.
+    # jobs.recover is intentionally NOT run here: a cold start while another
+    # instance is mid-batch must not mark its live job interrupted.
+    global _SERVERLESS_READY
+    if _SERVERLESS_READY:
+        return
+    _SERVERLESS_READY = True
+    try:
+        if security.enabled():
+            security.init(sys.modules[__name__])
+    except Exception:
+        pass
+
+def app(environ, start_response):
+    """WSGI entrypoint loaded by Vercel's Python runtime."""
+    _serverless_init()
+    try:
+        length = int(environ.get('CONTENT_LENGTH') or 0)
+    except (TypeError, ValueError):
+        length = 0
+    body = environ['wsgi.input'].read(length) if length > 0 else b''
+    path = environ.get('PATH_INFO') or '/'
+    if environ.get('QUERY_STRING'):
+        path += '?' + environ['QUERY_STRING']
+    lines = [(environ.get('REQUEST_METHOD') or 'GET') + ' ' + path + ' HTTP/1.1']
+    for key in sorted(environ):
+        if key.startswith('HTTP_'):
+            lines.append(key[5:].replace('_', '-').title() + ': ' + str(environ[key]))
+    if environ.get('CONTENT_TYPE'):
+        lines.append('Content-Type: ' + environ['CONTENT_TYPE'])
+    if length > 0:
+        lines.append('Content-Length: ' + str(length))
+    raw = ('\r\n'.join(lines) + '\r\n\r\n').encode('latin1') + body
+    sock = _WsgiSock(raw)
+    try:
+        Handler(sock, ('127.0.0.1', 0), _WsgiServer())
+    except Exception:
+        start_response('500 Internal Server Error', [('Content-Type', 'application/json; charset=utf-8')])
+        return [b'{"error":"Internal error; check local data and retry"}']
+    out = sock.out.getvalue()
+    head, _, resp_body = out.partition(b'\r\n\r\n')
+    parts = head.split(b'\r\n')
+    bits = parts[0].decode('latin1').split(' ', 2)
+    status = bits[1] + (' ' + bits[2] if len(bits) > 2 else '')
+    headers = []
+    for line in parts[1:]:
+        k, _, v = line.partition(b':')
+        if k:
+            headers.append((k.decode('latin1').strip(), v.decode('latin1').strip()))
+    start_response(status, headers)
+    return [resp_body]
