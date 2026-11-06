@@ -1,0 +1,13 @@
+# SignalDesk
+
+> SignalDesk is a GTM (go-to-market) workspace that scores your account list against your own fit rules and prepares reviewed outreach drafts from the research you supply. Every decision is visible and nothing sends without your approval. Built by Siva Dheeraj.
+
+## What it does
+- Scores accounts against fit rules you define, with the evidence behind each score shown
+- Traces every workflow step so results can be audited
+- Prepares outreach drafts for your review; no automated sends
+
+## Links
+- App: https://signaldesk-gtm.vercel.app/
+- Source: https://github.com/Sivadheeraj5356/signaldesk-gtm
+- Builder: https://sivadheeraj.vercel.app/

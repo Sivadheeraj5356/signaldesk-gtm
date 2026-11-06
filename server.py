@@ -423,6 +423,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/healthz': return self.send(200,{'ok':True})
         if not self.trusted(): return self.send(403,{'error':'Local access only'})
+        if self.path in ['/robots.txt','/sitemap.xml','/llms.txt']:
+            f=ROOT/self.path.lstrip('/')
+            if f.is_file(): return self.send(200,f.read_text(),'application/xml' if self.path.endswith('.xml') else 'text/plain')
         if security.enabled():
             auth=security.session(sys.modules[__name__],self.headers.get('Cookie'))
             if self.path=='/api/auth':return self.send(200,{'authenticated':bool(auth),'csrf':auth['csrf'] if auth else None})
